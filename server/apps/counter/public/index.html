@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Counter App</title>
+  <link rel="stylesheet" href="/ui/style.css">
+  <style>
+    body {
+      background: #fff;
+      color: #333;
+      font-family: sans-serif;
+      padding: 20px;
+    }
+    .counters {
+      display: grid;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    .counter-card {
+      background: #f5f5f5;
+      padding: 15px;
+      border-radius: 5px;
+      border-left: 3px solid #0066cc;
+    }
+    .counter-id {
+      font-weight: 500;
+      color: #333;
+      margin-bottom: 5px;
+    }
+    .counter-count {
+      font-size: 2em;
+      font-weight: bold;
+      color: #0066cc;
+    }
+  </style>
+</head>
+<body>
+  <h1>Counter App</h1>
+  <p>This UI is now served statically from the app's public directory.</p>
+  <div class="controls-info">
+    <p>
+      <strong>Controls:</strong><br>
+      Preset 1 / Dial Right: Increment (+1)<br>
+      Preset 2 / Dial Left: Decrement (-1)<br>
+      Preset 3: Reset to 0
+    </p>
+  </div>
+  <div id="counters" class="counters">
+    <p>Counter data will be loaded here via WebSocket...</p>
+  </div>
+</body>
+</html>

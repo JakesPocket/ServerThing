@@ -5,11 +5,65 @@ const path = require('path');
 const fs = require('fs');
 
 const PORT = process.env.PORT || 3000;
+const DATA_DIR = path.join(__dirname, '..', 'data');
+
+// Simple JSON file persistence
+class PersistenceManager {
+  constructor(dir) {
+    this.dir = dir;
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+  }
+
+  read(name) {
+    const filePath = path.join(this.dir, `${name}.json`);
+    if (fs.existsSync(filePath)) {
+      try {
+        const data = fs.readFileSync(filePath, 'utf8');
+        return JSON.parse(data);
+      } catch (err) {
+        console.error(`Error reading persistence file ${name}.json:`, err.message);
+        return null;
+      }
+    }
+    return null;
+  }
+
+  write(name, data) {
+    const filePath = path.join(this.dir, `${name}.json`);
+    try {
+      fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+    } catch (err) {
+      console.error(`Error writing persistence file ${name}.json:`, err.message);
+    }
+  }
+}
+
 
 // Device state manager
 class DeviceStateManager {
-  constructor() {
+  constructor(persistenceManager) {
     this.devices = new Map(); // deviceId -> state
+    this.persistence = persistenceManager;
+    this.loadState();
+  }
+
+  loadState() {
+    const persistedDevices = this.persistence.read('devices');
+    if (persistedDevices) {
+      for (const device of persistedDevices) {
+        this.devices.set(device.id, { ...device, connected: false });
+      }
+      console.log(`Loaded ${this.devices.size} devices from persistence`);
+    }
+  }
+
+  saveState() {
+    const allDevices = Array.from(this.devices.values());
+    // Mark all as disconnected for persistence
+    const persistedDevices = allDevices.map(d => ({ ...d, connected: false }));
+    this.persistence.write('devices', persistedDevices);
   }
 
   getDevice(deviceId) {
@@ -20,6 +74,7 @@ class DeviceStateManager {
         lastSeen: Date.now(),
         inputs: []
       });
+      this.saveState();
     }
     return this.devices.get(deviceId);
   }
@@ -27,6 +82,7 @@ class DeviceStateManager {
   updateDevice(deviceId, updates) {
     const device = this.getDevice(deviceId);
     Object.assign(device, updates, { lastSeen: Date.now() });
+    this.saveState();
     return device;
   }
 
@@ -37,6 +93,7 @@ class DeviceStateManager {
     if (device.inputs.length > 100) {
       device.inputs.shift();
     }
+    // Note: Not saving state on every input to avoid excessive writes
     return device;
   }
 
@@ -46,14 +103,38 @@ class DeviceStateManager {
 
   removeDevice(deviceId) {
     this.devices.delete(deviceId);
+    this.saveState();
   }
 }
 
 // App manager
 class AppManager {
-  constructor() {
+  constructor(persistenceManager) {
     this.apps = new Map();
+    this.persistence = persistenceManager;
     this.loadApps();
+    this.loadState();
+  }
+
+  loadState() {
+    const persistedApps = this.persistence.read('apps');
+    if (persistedApps) {
+      for (const persistedApp of persistedApps) {
+        const app = this.apps.get(persistedApp.id);
+        if (app) {
+          app.enabled = persistedApp.enabled;
+        }
+      }
+      console.log('Loaded app enabled/disabled states from persistence');
+    }
+  }
+
+  saveState() {
+    const appStates = Array.from(this.apps.values()).map(app => ({
+      id: app.id,
+      enabled: app.enabled
+    }));
+    this.persistence.write('apps', appStates);
   }
 
   loadApps() {
@@ -67,6 +148,8 @@ class AppManager {
     for (const entry of entries) {
       if (entry.isDirectory()) {
         const appPath = path.join(appsDir, entry.name, 'index.js');
+        const publicUiPath = path.join(appsDir, entry.name, 'public');
+        
         if (fs.existsSync(appPath)) {
           try {
             // Clear require cache to allow hot reload
@@ -74,8 +157,9 @@ class AppManager {
             const app = require(appPath);
             this.apps.set(entry.name, {
               id: entry.name,
-              enabled: true,
+              enabled: true, // Default to enabled
               instance: app,
+              hasPublicUI: fs.existsSync(publicUiPath),
               ...app.metadata
             });
             console.log(`Loaded app: ${entry.name}`);
@@ -92,7 +176,8 @@ class AppManager {
       id: app.id,
       name: app.name || app.id,
       description: app.description || '',
-      enabled: app.enabled
+      enabled: app.enabled,
+      hasPublicUI: app.hasPublicUI
     }));
   }
 
@@ -104,6 +189,7 @@ class AppManager {
     const app = this.apps.get(appId);
     if (app) {
       app.enabled = true;
+      this.saveState();
       return true;
     }
     return false;
@@ -113,14 +199,16 @@ class AppManager {
     const app = this.apps.get(appId);
     if (app) {
       app.enabled = false;
+      this.saveState();
       return true;
     }
     return false;
   }
 
+  // reloadApps is no longer needed for route mounting, but kept for consistency
+  // nodemon will handle server restarts
   reloadApps() {
-    this.apps.clear();
-    this.loadApps();
+    console.log('App reload requested. Please restart the server to apply changes.');
   }
 
   handleInput(appId, deviceId, input) {
@@ -133,43 +221,85 @@ class AppManager {
 }
 
 // Initialize managers
-const deviceManager = new DeviceStateManager();
-const appManager = new AppManager();
+const persistenceManager = new PersistenceManager(DATA_DIR);
+const deviceManager = new DeviceStateManager(persistenceManager);
+const appManager = new AppManager(persistenceManager);
 
 // Express app
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
+// Mount app UIs
+function mountAppUIs(expressApp, appManager) {
+  const apps = appManager.getApps();
+  for (const app of apps) {
+    if (app.hasPublicUI) {
+      const publicUiPath = path.join(__dirname, 'apps', app.id, 'public');
+      console.log(`Mounting UI for ${app.id} at /apps/${app.id}`);
+      expressApp.use(`/apps/${app.id}`, express.static(publicUiPath));
+    }
+  }
+}
+mountAppUIs(app, appManager);
+
+
 // HTTP server
 const server = http.createServer(app);
 
-// WebSocket server
-const wss = new WebSocketServer({ noServer: true });
+// WebSocket server for devices
+const wssDevice = new WebSocketServer({ noServer: true });
+const deviceConnections = new Map(); // deviceId -> ws
 
-// WebSocket connections (deviceId -> ws)
-const wsConnections = new Map();
+// WebSocket server for UI
+const wssUI = new WebSocketServer({ noServer: true });
+const uiConnections = new Set();
+
+// Broadcast to all UI clients
+function broadcastUI(data) {
+  const message = JSON.stringify(data);
+  uiConnections.forEach(ws => {
+    if (ws.readyState === 1) { // WebSocket.OPEN
+      ws.send(message);
+    }
+  });
+}
 
 // Handle WebSocket upgrade
 server.on('upgrade', (request, socket, head) => {
   const pathname = new URL(request.url, 'ws://localhost').pathname;
   
   if (pathname === '/ws/device') {
-    wss.handleUpgrade(request, socket, head, (ws) => {
-      wss.emit('connection', ws, request);
+    wssDevice.handleUpgrade(request, socket, head, (ws) => {
+      wssDevice.emit('connection', ws, request);
+    });
+  } else if (pathname === '/ws/ui') {
+    wssUI.handleUpgrade(request, socket, head, (ws) => {
+      wssUI.emit('connection', ws, request);
     });
   } else {
     socket.destroy();
   }
 });
 
-// Handle WebSocket connections
-wss.on('connection', (ws, request) => {
+// Handle UI WebSocket connections
+wssUI.on('connection', (ws) => {
+  console.log('UI client connected');
+  uiConnections.add(ws);
+  ws.on('close', () => {
+    console.log('UI client disconnected');
+    uiConnections.delete(ws);
+  });
+});
+
+// Handle device WebSocket connections
+wssDevice.on('connection', (ws, request) => {
   const deviceId = new URL(request.url, 'ws://localhost').searchParams.get('id') || `device-${Date.now()}`;
   
   console.log(`Device connected: ${deviceId}`);
-  wsConnections.set(deviceId, ws);
+  deviceConnections.set(deviceId, ws);
   deviceManager.updateDevice(deviceId, { connected: true });
+  broadcastUI({ type: 'devices-changed' });
 
   // Send initial state
   ws.send(JSON.stringify({
@@ -212,8 +342,9 @@ wss.on('connection', (ws, request) => {
 
   ws.on('close', () => {
     console.log(`Device disconnected: ${deviceId}`);
-    wsConnections.delete(deviceId);
+    deviceConnections.delete(deviceId);
     deviceManager.updateDevice(deviceId, { connected: false });
+    broadcastUI({ type: 'devices-changed' });
   });
 
   ws.on('error', (err) => {
@@ -236,7 +367,7 @@ app.post('/api/apps/:appId/enable', (req, res) => {
     res.json({ success: true, message: `App ${appId} enabled` });
     
     // Notify all connected devices
-    wsConnections.forEach(ws => {
+    deviceConnections.forEach(ws => {
       if (ws.readyState === 1) { // WebSocket.OPEN
         ws.send(JSON.stringify({
           type: 'app-enabled',
@@ -244,6 +375,7 @@ app.post('/api/apps/:appId/enable', (req, res) => {
         }));
       }
     });
+    broadcastUI({ type: 'apps-changed' });
   } else {
     res.status(404).json({ success: false, message: 'App not found' });
   }
@@ -255,7 +387,7 @@ app.post('/api/apps/:appId/disable', (req, res) => {
     res.json({ success: true, message: `App ${appId} disabled` });
     
     // Notify all connected devices
-    wsConnections.forEach(ws => {
+    deviceConnections.forEach(ws => {
       if (ws.readyState === 1) { // WebSocket.OPEN
         ws.send(JSON.stringify({
           type: 'app-disabled',
@@ -263,34 +395,9 @@ app.post('/api/apps/:appId/disable', (req, res) => {
         }));
       }
     });
+    broadcastUI({ type: 'apps-changed' });
   } else {
     res.status(404).json({ success: false, message: 'App not found' });
-  }
-});
-
-app.post('/api/apps/reload', (req, res) => {
-  appManager.reloadApps();
-  res.json({ success: true, message: 'Apps reloaded', apps: appManager.getApps() });
-  
-  // Notify all connected devices
-  wsConnections.forEach(ws => {
-    if (ws.readyState === 1) { // WebSocket.OPEN
-      ws.send(JSON.stringify({
-        type: 'apps-reloaded',
-        apps: appManager.getApps()
-      }));
-    }
-  });
-});
-
-app.get('/api/apps/:appId/ui', (req, res) => {
-  const { appId } = req.params;
-  const app = appManager.getApp(appId);
-  
-  if (app && app.instance.getUI) {
-    res.send(app.instance.getUI());
-  } else {
-    res.status(404).send('<p>No UI available for this app</p>');
   }
 });
 
@@ -298,6 +405,7 @@ app.get('/api/apps/:appId/ui', (req, res) => {
 server.listen(PORT, () => {
   console.log(`ServerThing running on http://localhost:${PORT}`);
   console.log(`Web UI available at http://localhost:${PORT}/ui`);
-  console.log(`WebSocket endpoint: ws://localhost:${PORT}/ws/device`);
+  console.log(`WebSocket endpoint for devices: ws://localhost:${PORT}/ws/device`);
+  console.log(`WebSocket endpoint for UI: ws://localhost:${PORT}/ws/ui`);
   console.log(`Loaded ${appManager.getApps().length} app(s)`);
 });
