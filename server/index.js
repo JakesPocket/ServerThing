@@ -237,10 +237,12 @@ app.post('/api/apps/:appId/enable', (req, res) => {
     
     // Notify all connected devices
     wsConnections.forEach(ws => {
-      ws.send(JSON.stringify({
-        type: 'app-enabled',
-        appId
-      }));
+      if (ws.readyState === 1) { // WebSocket.OPEN
+        ws.send(JSON.stringify({
+          type: 'app-enabled',
+          appId
+        }));
+      }
     });
   } else {
     res.status(404).json({ success: false, message: 'App not found' });
@@ -254,10 +256,12 @@ app.post('/api/apps/:appId/disable', (req, res) => {
     
     // Notify all connected devices
     wsConnections.forEach(ws => {
-      ws.send(JSON.stringify({
-        type: 'app-disabled',
-        appId
-      }));
+      if (ws.readyState === 1) { // WebSocket.OPEN
+        ws.send(JSON.stringify({
+          type: 'app-disabled',
+          appId
+        }));
+      }
     });
   } else {
     res.status(404).json({ success: false, message: 'App not found' });
@@ -270,10 +274,12 @@ app.post('/api/apps/reload', (req, res) => {
   
   // Notify all connected devices
   wsConnections.forEach(ws => {
-    ws.send(JSON.stringify({
-      type: 'apps-reloaded',
-      apps: appManager.getApps()
-    }));
+    if (ws.readyState === 1) { // WebSocket.OPEN
+      ws.send(JSON.stringify({
+        type: 'apps-reloaded',
+        apps: appManager.getApps()
+      }));
+    }
   });
 });
 
