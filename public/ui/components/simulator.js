@@ -1,4 +1,4 @@
-import { MessageType } from '../../../shared/protocol.js';
+import { MessageType } from '/shared/protocol.js';
 
 // public/ui/components/simulator.js
 
@@ -92,10 +92,19 @@ export function initSimulator() {
   document.getElementById('sim-connect').addEventListener('click', connectSimulator);
   document.getElementById('sim-disconnect').addEventListener('click', disconnectSimulator);
 
-  // Add click handlers for input buttons
+  // Add click handlers for all input buttons
+  // Handles:
+  // - Preset buttons: data-input="button", data-value="preset1-4"
+  // - Settings button: data-input="button", data-value="settings"
+  // - Dial click: data-input="button", data-value="dial-click"
+  // - Dial turn: data-input="dial", data-value="left|right"
+  // - Back button: data-input="button", data-value="back"
+  // - Touch gestures: data-input="touch", data-value="swipe-left|swipe-right|tap"
   document.addEventListener('click', (e) => {
     if (e.target.dataset.input) {
-      sendInput(e.target.dataset.input, e.target.dataset.value);
+      const inputType = e.target.dataset.input;
+      const inputValue = e.target.dataset.value;
+      sendInput(inputType, inputValue);
     }
   });
 }

@@ -1,4 +1,4 @@
-const { InputType, ButtonValue, DialValue } = require('../../shared/protocol.js');
+const { InputType, ButtonValue, DialValue } = require('../../../shared/protocol.js');
 
 // Counter App - Example app for ServerThing
 // Demonstrates app structure with UI and input handling

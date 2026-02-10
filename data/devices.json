@@ -1,0 +1,164 @@
+[
+  {
+    "id": "simulator",
+    "connected": false,
+    "lastSeen": 1770699831147,
+    "inputs": [
+      {
+        "type": "button",
+        "value": "preset1",
+        "timestamp": 1770697600631
+      },
+      {
+        "type": "dial",
+        "value": "right",
+        "timestamp": 1770697628690
+      },
+      {
+        "type": "button",
+        "value": "preset2",
+        "timestamp": 1770697630422
+      },
+      {
+        "type": "button",
+        "value": "preset3",
+        "timestamp": 1770697630954
+      },
+      {
+        "type": "button",
+        "value": "preset4",
+        "timestamp": 1770697631458
+      },
+      {
+        "type": "back",
+        "value": "press",
+        "timestamp": 1770697979659
+      },
+      {
+        "type": "button",
+        "value": "dial-click",
+        "timestamp": 1770698315657
+      },
+      {
+        "type": "dial",
+        "value": "right",
+        "timestamp": 1770698317562
+      },
+      {
+        "type": "dial",
+        "value": "left",
+        "timestamp": 1770698318116
+      },
+      {
+        "type": "button",
+        "value": "back",
+        "timestamp": 1770698318769
+      },
+      {
+        "type": "touch",
+        "value": "swipe-left",
+        "timestamp": 1770698319451
+      },
+      {
+        "type": "touch",
+        "value": "swipe-right",
+        "timestamp": 1770698319878
+      },
+      {
+        "type": "touch",
+        "value": "tap",
+        "timestamp": 1770698320329
+      },
+      {
+        "type": "button",
+        "value": "preset4",
+        "timestamp": 1770698321334
+      },
+      {
+        "type": "button",
+        "value": "preset3",
+        "timestamp": 1770698321814
+      },
+      {
+        "type": "button",
+        "value": "settings",
+        "timestamp": 1770698322271
+      },
+      {
+        "type": "button",
+        "value": "back",
+        "timestamp": 1770698475435
+      },
+      {
+        "type": "button",
+        "value": "back",
+        "timestamp": 1770698475529
+      },
+      {
+        "type": "touch",
+        "value": "swipe-left",
+        "timestamp": 1770698476797
+      },
+      {
+        "type": "touch",
+        "value": "swipe-right",
+        "timestamp": 1770698477278
+      },
+      {
+        "type": "touch",
+        "value": "tap",
+        "timestamp": 1770698477720
+      },
+      {
+        "type": "dial",
+        "value": "left",
+        "timestamp": 1770698478493
+      },
+      {
+        "type": "dial",
+        "value": "right",
+        "timestamp": 1770698478890
+      },
+      {
+        "type": "button",
+        "value": "dial-click",
+        "timestamp": 1770698479340
+      },
+      {
+        "type": "button",
+        "value": "preset1",
+        "timestamp": 1770698481158
+      },
+      {
+        "type": "button",
+        "value": "preset2",
+        "timestamp": 1770698481590
+      },
+      {
+        "type": "button",
+        "value": "preset3",
+        "timestamp": 1770698482092
+      },
+      {
+        "type": "button",
+        "value": "preset4",
+        "timestamp": 1770698482753
+      },
+      {
+        "type": "button",
+        "value": "settings",
+        "timestamp": 1770698483232
+      },
+      {
+        "type": "dial",
+        "value": "right",
+        "timestamp": 1770698533538
+      },
+      {
+        "type": "dial",
+        "value": "left",
+        "timestamp": 1770698534347
+      }
+    ]
+  }
+]

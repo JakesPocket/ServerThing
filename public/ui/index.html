@@ -49,19 +49,25 @@
         <div id="sim-controls" style="display: none; margin-top: 20px;">
           <h3>Send Input Events</h3>
           <div class="input-group">
-            <label>Button:</label>
+            <label>Buttons (Front Panel):</label>
             <button class="btn btn-small" data-input="button" data-value="preset1">Preset 1</button>
             <button class="btn btn-small" data-input="button" data-value="preset2">Preset 2</button>
             <button class="btn btn-small" data-input="button" data-value="preset3">Preset 3</button>
             <button class="btn btn-small" data-input="button" data-value="preset4">Preset 4</button>
+            <button class="btn btn-small btn-info" data-input="button" data-value="settings">Settings</button>
           </div>
           <div class="input-group">
-            <label>Dial:</label>
+            <label>Dial (Turn or Click):</label>
             <button class="btn btn-small" data-input="dial" data-value="left">Turn Left</button>
             <button class="btn btn-small" data-input="dial" data-value="right">Turn Right</button>
+            <button class="btn btn-small btn-dial" data-input="button" data-value="dial-click">Dial Click</button>
           </div>
           <div class="input-group">
-            <label>Touch:</label>
+            <label>Navigation (Front):</label>
+            <button class="btn btn-back" data-input="button" data-value="back">Back</button>
+          </div>
+          <div class="input-group">
+            <label>Touch/Gesture:</label>
             <button class="btn btn-small" data-input="touch" data-value="swipe-left">Swipe Left</button>
             <button class="btn btn-small" data-input="touch" data-value="swipe-right">Swipe Right</button>
             <button class="btn btn-small" data-input="touch" data-value="tap">Tap</button>

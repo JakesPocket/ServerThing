@@ -107,6 +107,42 @@ h3 {
   background: #c82333;
 }
 
+.btn-info {
+  background: #17a2b8;
+}
+
+.btn-info:hover {
+  background: #138496;
+}
+
+.btn-dial {
+  background: #6c757d;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.btn-dial:hover {
+  background: #5a6268;
+}
+
+.btn-back {
+  width: 60px;
+  height: 60px;
+  padding: 0;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #ff6b6b;
+  font-weight: 600;
+  font-size: 14px;
+  margin: 10px 0;
+}
+
+.btn-back:hover {
+  background: #ff5252;
+}
+
 .loading {
   color: #888;
   font-style: italic;

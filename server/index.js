@@ -276,6 +276,8 @@ function mountAppUIs(expressApp, appManager) {
 }
 mountAppUIs(app, appManager);
 
+// Serve shared folder for frontend modules
+app.use('/shared', express.static(path.join(__dirname, '..', 'shared')));
 
 // HTTP server
 const server = http.createServer(app);
@@ -303,85 +305,121 @@ function broadcastUI(data) {
 
 // Handle WebSocket upgrade
 server.on('upgrade', (request, socket, head) => {
-  const pathname = new URL(request.url, 'ws://localhost').pathname;
-  
-  if (pathname === '/ws/device') {
-    wssDevice.handleUpgrade(request, socket, head, (ws) => {
-      wssDevice.emit('connection', ws, request);
-    });
-  } else if (pathname === '/ws/ui') {
-    wssUI.handleUpgrade(request, socket, head, (ws) => {
-      wssUI.emit('connection', ws, request);
-    });
-  } else {
+  try {
+    const pathname = new URL(request.url, 'ws://localhost').pathname;
+    console.log(`[Upgrade] Incoming WebSocket upgrade request: ${request.url} (path: ${pathname})`);
+    
+    if (pathname === '/ws/device') {
+      console.log('[Upgrade] Routing to device WebSocket server');
+      wssDevice.handleUpgrade(request, socket, head, (ws) => {
+        console.log('[Upgrade] Device WebSocket upgraded successfully');
+        wssDevice.emit('connection', ws, request);
+      });
+    } else if (pathname === '/ws/ui') {
+      console.log('[Upgrade] Routing to UI WebSocket server');
+      wssUI.handleUpgrade(request, socket, head, (ws) => {
+        console.log('[Upgrade] UI WebSocket upgraded successfully');
+        wssUI.emit('connection', ws, request);
+      });
+    } else {
+      console.log(`[Upgrade] Unknown path, destroying socket: ${pathname}`);
+      socket.destroy();
+    }
+  } catch (err) {
+    console.error('WebSocket upgrade error:', err.message, err.stack);
     socket.destroy();
   }
 });
 
 // Handle UI WebSocket connections
 wssUI.on('connection', (ws) => {
-  uiConnections.add(ws);
-  ws.on('close', () => {
-    uiConnections.delete(ws);
-  });
+  try {
+    console.log('[UI] New UI WebSocket connection');
+    uiConnections.add(ws);
+    console.log(`[UI] UI client connected. Total UI clients: ${uiConnections.size}`);
+    
+    ws.on('close', () => {
+      console.log('[UI] UI WebSocket closed');
+      uiConnections.delete(ws);
+      console.log(`[UI] UI client disconnected. Total UI clients: ${uiConnections.size}`);
+    });
+    ws.on('error', (err) => {
+      console.error('[UI] WebSocket error:', err.message);
+    });
+  } catch (err) {
+    console.error('Error in UI connection handler:', err.message, err.stack);
+    ws.close();
+  }
 });
 
 // Handle device WebSocket connections
 wssDevice.on('connection', (ws, request) => {
-  const deviceId = new URL(request.url, 'ws://localhost').searchParams.get('id') || `device-${Date.now()}`;
-  
-  deviceConnections.set(deviceId, ws);
-  deviceManager.updateDevice(deviceId, { connected: true });
-  broadcastUI({ type: MessageType.S2U_DEVICES_CHANGED });
-
-  // Send initial state
-  ws.send(JSON.stringify({
-    type: MessageType.S2D_CONNECTED,
-    deviceId,
-    apps: appManager.getApps()
-  }));
-
-  ws.on('message', (data) => {
-    try {
-      const message = JSON.parse(data.toString());
-      
-      if (message.type === MessageType.D2S_INPUT) {
-        // Store input event
-        deviceManager.addInput(deviceId, message.data);
-        
-        // Broadcast to all enabled apps
-        const apps = appManager.getApps().filter(app => app.enabled);
-        for (const app of apps) {
-          const response = appManager.handleInput(app.id, deviceId, message.data);
-          if (response) {
-            ws.send(JSON.stringify({
-              type: MessageType.S2D_APP_RESPONSE,
-              appId: app.id,
-              data: response
-            }));
-          }
-        }
-        
-        // Echo back to device
-        ws.send(JSON.stringify({
-          type: MessageType.S2D_INPUT_RECEIVED,
-          data: message.data
-        }));
-      }
-    } catch (err) {
-      console.error('Error handling message:', err.message);
-    }
-  });
-
-  ws.on('close', () => {
-    deviceConnections.delete(deviceId);
-    deviceManager.updateDevice(deviceId, { connected: false });
+  try {
+    const deviceId = new URL(request.url, 'ws://localhost').searchParams.get('id') || `device-${Date.now()}`;
+    console.log(`[Device] New device connection: ${deviceId}`);
+    
+    deviceConnections.set(deviceId, ws);
+    deviceManager.updateDevice(deviceId, { connected: true });
+    console.log(`[Device] Device ${deviceId} added to connections. Total devices: ${deviceConnections.size}`);
+    
     broadcastUI({ type: MessageType.S2U_DEVICES_CHANGED });
-  });
 
-  ws.on('error', (err) => {
-    console.error(`WebSocket error for ${deviceId}:`, err.message);
-  });
+    // Send initial state
+    const initialMessage = {
+      type: MessageType.S2D_CONNECTED,
+      deviceId,
+      apps: appManager.getApps()
+    };
+    console.log(`[Device] Sending initial state to ${deviceId}:`, JSON.stringify(initialMessage));
+    ws.send(JSON.stringify(initialMessage));
+
+    ws.on('message', (data) => {
+      try {
+        const message = JSON.parse(data.toString());
+        console.log(`[Device] Message from ${deviceId}:`, message.type);
+        
+        if (message.type === MessageType.D2S_INPUT) {
+          // Store input event
+          deviceManager.addInput(deviceId, message.data);
+          
+          // Broadcast to all enabled apps
+          const apps = appManager.getApps().filter(app => app.enabled);
+          for (const app of apps) {
+            const response = appManager.handleInput(app.id, deviceId, message.data);
+            if (response) {
+              ws.send(JSON.stringify({
+                type: MessageType.S2D_APP_RESPONSE,
+                appId: app.id,
+                data: response
+              }));
+            }
+          }
+          
+          // Echo back to device
+          ws.send(JSON.stringify({
+            type: MessageType.S2D_INPUT_RECEIVED,
+            data: message.data
+          }));
+        }
+      } catch (err) {
+        console.error(`[Device] Error handling message from ${deviceId}:`, err.message);
+      }
+    });
+
+    ws.on('close', () => {
+      console.log(`[Device] Device disconnected: ${deviceId}`);
+      deviceConnections.delete(deviceId);
+      deviceManager.updateDevice(deviceId, { connected: false });
+      broadcastUI({ type: MessageType.S2U_DEVICES_CHANGED });
+    });
+
+    ws.on('error', (err) => {
+      console.error(`[Device] WebSocket error for ${deviceId}:`, err.message);
+    });
+  } catch (err) {
+    console.error('Error in device connection handler:', err.message, err.stack);
+    ws.close();
+  }
 });
 
 // API Routes
@@ -477,9 +515,11 @@ app.post('/api/apps/install', upload.single('app-zip'), (req, res) => {
 
 // Start server
 server.listen(PORT, () => {
+  console.log(`\n========================================`);
   console.log(`ServerThing running on http://localhost:${PORT}`);
   console.log(`Web UI available at http://localhost:${PORT}/ui`);
   console.log(`WebSocket endpoint for devices: ws://localhost:${PORT}/ws/device`);
   console.log(`WebSocket endpoint for UI: ws://localhost:${PORT}/ws/ui`);
   console.log(`Loaded ${appManager.getApps().length} app(s)`);
+  console.log(`========================================\n`);
 });
