@@ -4,12 +4,23 @@ const http = require('http');
 const path = require('path');
 const fs = require('fs');
 const { MessageType } = require('../shared/protocol.js');
+const multer = require('multer');
+const AdmZip = require('adm-zip');
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = path.join(__dirname, '..', 'data');
+const APPS_DIR = path.join(__dirname, 'apps');
 
-// Simple JSON file persistence
+// Multer setup for file uploads in memory
+const upload = multer({ storage: multer.memoryStorage() });
+
+/**
+ * Manages reading and writing state to the filesystem.
+ */
 class PersistenceManager {
+  /**
+   * @param {string} dir The directory to store data files in.
+   */
   constructor(dir) {
     this.dir = dir;
     if (!fs.existsSync(dir)) {
@@ -17,6 +28,11 @@ class PersistenceManager {
     }
   }
 
+  /**
+   * Reads and parses a JSON file.
+   * @param {string} name The name of the file (without extension).
+   * @returns {object | null} The parsed JSON data or null if an error occurs.
+   */
   read(name) {
     const filePath = path.join(this.dir, `${name}.json`);
     if (fs.existsSync(filePath)) {
@@ -31,6 +47,11 @@ class PersistenceManager {
     return null;
   }
 
+  /**
+   * Writes data to a JSON file.
+   * @param {string} name The name of the file (without extension).
+   * @param {object} data The data to write.
+   */
   write(name, data) {
     const filePath = path.join(this.dir, `${name}.json`);
     try {
@@ -41,9 +62,13 @@ class PersistenceManager {
   }
 }
 
-
-// Device state manager
+/**
+ * Manages the state of all connected devices.
+ */
 class DeviceStateManager {
+  /**
+   * @param {PersistenceManager} persistenceManager
+   */
   constructor(persistenceManager) {
     this.devices = new Map(); // deviceId -> state
     this.persistence = persistenceManager;
@@ -56,7 +81,6 @@ class DeviceStateManager {
       for (const device of persistedDevices) {
         this.devices.set(device.id, { ...device, connected: false });
       }
-      console.log(`Loaded ${this.devices.size} devices from persistence`);
     }
   }
 
@@ -108,8 +132,13 @@ class DeviceStateManager {
   }
 }
 
-// App manager
+/**
+ * Manages the lifecycle and state of all installed apps.
+ */
 class AppManager {
+  /**
+   * @param {PersistenceManager} persistenceManager
+   */
   constructor(persistenceManager) {
     this.apps = new Map();
     this.persistence = persistenceManager;
@@ -126,7 +155,6 @@ class AppManager {
           app.enabled = persistedApp.enabled;
         }
       }
-      console.log('Loaded app enabled/disabled states from persistence');
     }
   }
 
@@ -153,7 +181,7 @@ class AppManager {
         
         if (fs.existsSync(appPath)) {
           try {
-            // Clear require cache to allow hot reload
+            // Clear require cache to allow hot reload on server restart
             delete require.cache[require.resolve(appPath)];
             const app = require(appPath);
             this.apps.set(entry.name, {
@@ -163,7 +191,6 @@ class AppManager {
               hasPublicUI: fs.existsSync(publicUiPath),
               ...app.metadata
             });
-            console.log(`Loaded app: ${entry.name}`);
           } catch (err) {
             console.error(`Failed to load app ${entry.name}:`, err.message);
           }
@@ -206,8 +233,10 @@ class AppManager {
     return false;
   }
 
-  // reloadApps is no longer needed for route mounting, but kept for consistency
-  // nodemon will handle server restarts
+  /**
+   * Note: With nodemon, a server restart is required to apply app changes.
+   * This function is kept for potential future use or manual triggering.
+   */
   reloadApps() {
     console.log('App reload requested. Please restart the server to apply changes.');
   }
@@ -231,13 +260,16 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
-// Mount app UIs
+/**
+ * Mounts static UI directories for all apps that have a `public` folder.
+ * @param {import('express').Express} expressApp The Express application instance.
+ * @param {AppManager} appManager The app manager instance.
+ */
 function mountAppUIs(expressApp, appManager) {
   const apps = appManager.getApps();
   for (const app of apps) {
     if (app.hasPublicUI) {
       const publicUiPath = path.join(__dirname, 'apps', app.id, 'public');
-      console.log(`Mounting UI for ${app.id} at /apps/${app.id}`);
       expressApp.use(`/apps/${app.id}`, express.static(publicUiPath));
     }
   }
@@ -256,7 +288,10 @@ const deviceConnections = new Map(); // deviceId -> ws
 const wssUI = new WebSocketServer({ noServer: true });
 const uiConnections = new Set();
 
-// Broadcast to all UI clients
+/**
+ * Broadcasts a message to all connected UI clients.
+ * @param {object} data The data to send.
+ */
 function broadcastUI(data) {
   const message = JSON.stringify(data);
   uiConnections.forEach(ws => {
@@ -285,10 +320,8 @@ server.on('upgrade', (request, socket, head) => {
 
 // Handle UI WebSocket connections
 wssUI.on('connection', (ws) => {
-  console.log('UI client connected');
   uiConnections.add(ws);
   ws.on('close', () => {
-    console.log('UI client disconnected');
     uiConnections.delete(ws);
   });
 });
@@ -297,7 +330,6 @@ wssUI.on('connection', (ws) => {
 wssDevice.on('connection', (ws, request) => {
   const deviceId = new URL(request.url, 'ws://localhost').searchParams.get('id') || `device-${Date.now()}`;
   
-  console.log(`Device connected: ${deviceId}`);
   deviceConnections.set(deviceId, ws);
   deviceManager.updateDevice(deviceId, { connected: true });
   broadcastUI({ type: MessageType.S2U_DEVICES_CHANGED });
@@ -342,7 +374,6 @@ wssDevice.on('connection', (ws, request) => {
   });
 
   ws.on('close', () => {
-    console.log(`Device disconnected: ${deviceId}`);
     deviceConnections.delete(deviceId);
     deviceManager.updateDevice(deviceId, { connected: false });
     broadcastUI({ type: MessageType.S2U_DEVICES_CHANGED });
@@ -399,6 +430,48 @@ app.post('/api/apps/:appId/disable', (req, res) => {
     broadcastUI({ type: MessageType.S2U_APPS_CHANGED });
   } else {
     res.status(404).json({ success: false, message: 'App not found' });
+  }
+});
+
+app.post('/api/apps/install', upload.single('app-zip'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ success: false, message: 'No app file uploaded.' });
+  }
+
+  const appName = path.basename(req.file.originalname, '.zip');
+  const appInstallPath = path.join(APPS_DIR, appName);
+
+  if (fs.existsSync(appInstallPath)) {
+    return res.status(400).json({ success: false, message: `App "${appName}" already exists.` });
+  }
+
+  try {
+    const zip = new AdmZip(req.file.buffer);
+    zip.extractAllTo(appInstallPath, true);
+
+    // Validate that the extracted app has the required structure
+    const expectedIndexFile = path.join(appInstallPath, 'index.js');
+    if (!fs.existsSync(expectedIndexFile)) {
+      // Clean up the partially installed app
+      fs.rmSync(appInstallPath, { recursive: true, force: true });
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Installation failed: App must contain an index.js file.' 
+      });
+    }
+
+    res.json({ 
+      success: true, 
+      message: `App "${appName}" installed successfully. Server is restarting.` 
+    });
+
+  } catch (err) {
+    console.error('App installation failed:', err);
+    // Clean up if the folder was created
+    if (fs.existsSync(appInstallPath)) {
+      fs.rmSync(appInstallPath, { recursive: true, force: true });
+    }
+    res.status(500).json({ success: false, message: 'Failed to extract or install app.' });
   }
 });
 

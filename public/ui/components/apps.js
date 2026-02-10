@@ -56,4 +56,53 @@ async function toggleApp(appId, currentlyEnabled) {
 // Expose functions to the global scope so inline onclick handlers can find them
 window.toggleApp = toggleApp;
 
-export { loadApps };
+export { loadApps, initAppInstaller };
+
+function initAppInstaller() {
+  const form = document.getElementById('app-upload-form');
+  const input = document.getElementById('app-zip-input');
+  const statusDiv = document.getElementById('upload-status');
+
+  if (!form) return;
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const file = input.files[0];
+    if (!file) {
+      statusDiv.textContent = 'Please select a file to upload.';
+      statusDiv.className = 'status-error';
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('app-zip', file);
+
+    statusDiv.textContent = 'Uploading and installing...';
+    statusDiv.className = 'status-loading';
+
+    try {
+      const response = await fetch(`${API_BASE}/api/apps/install`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        statusDiv.textContent = result.message;
+        statusDiv.className = 'status-success';
+        form.reset();
+        // The server will restart via nodemon, and the WebSocket will
+        // trigger a reload of the app list.
+      } else {
+        throw new Error(result.message || 'Installation failed.');
+      }
+    } catch (err) {
+      statusDiv.textContent = `Error: ${err.message}`;
+      statusDiv.className = 'status-error';
+      console.error('Error installing app:', err);
+    }
+  });
+}
+
