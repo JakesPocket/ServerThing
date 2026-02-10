@@ -1,0 +1,16 @@
+{
+  "name": "serverthing",
+  "version": "1.0.0",
+  "description": "Headless server for embedded devices (Superbird/Car Thing)",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js"
+  },
+  "keywords": ["car-thing", "superbird", "embedded", "server"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.14.2"
+  }
+}

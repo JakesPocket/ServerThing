@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ServerThing - Control Panel</title>
+  <link rel="stylesheet" href="/ui/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>ServerThing Control Panel</h1>
+      <p class="subtitle">Headless server for embedded devices</p>
+    </header>
+
+    <section class="panel">
+      <h2>Connected Devices</h2>
+      <div id="devices">
+        <p class="loading">Loading devices...</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Installed Apps</h2>
+      <button id="reload-apps" class="btn btn-secondary">Reload Apps</button>
+      <div id="apps">
+        <p class="loading">Loading apps...</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Device Simulator</h2>
+      <div class="simulator">
+        <p>Device ID: <span id="sim-device-id">simulator</span></p>
+        <p>Status: <span id="sim-status">disconnected</span></p>
+        <button id="sim-connect" class="btn">Connect</button>
+        <button id="sim-disconnect" class="btn btn-secondary" disabled>Disconnect</button>
+        
+        <div id="sim-controls" style="display: none; margin-top: 20px;">
+          <h3>Send Input Events</h3>
+          <div class="input-group">
+            <label>Button:</label>
+            <button class="btn btn-small" data-input="button" data-value="preset1">Preset 1</button>
+            <button class="btn btn-small" data-input="button" data-value="preset2">Preset 2</button>
+            <button class="btn btn-small" data-input="button" data-value="preset3">Preset 3</button>
+            <button class="btn btn-small" data-input="button" data-value="preset4">Preset 4</button>
+          </div>
+          <div class="input-group">
+            <label>Dial:</label>
+            <button class="btn btn-small" data-input="dial" data-value="left">Turn Left</button>
+            <button class="btn btn-small" data-input="dial" data-value="right">Turn Right</button>
+          </div>
+          <div class="input-group">
+            <label>Touch:</label>
+            <button class="btn btn-small" data-input="touch" data-value="swipe-left">Swipe Left</button>
+            <button class="btn btn-small" data-input="touch" data-value="swipe-right">Swipe Right</button>
+            <button class="btn btn-small" data-input="touch" data-value="tap">Tap</button>
+          </div>
+        </div>
+        
+        <div id="sim-log" style="margin-top: 20px;">
+          <h3>Event Log</h3>
+          <div id="sim-log-content" class="log"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>App UIs</h2>
+      <div id="app-uis">
+        <p class="loading">Select an app to view its UI</p>
+      </div>
+    </section>
+  </div>
+
+  <script src="/ui/app.js"></script>
+</body>
+</html>
