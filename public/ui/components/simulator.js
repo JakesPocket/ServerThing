@@ -1,3 +1,5 @@
+import { MessageType } from '../../../shared/protocol.js';
+
 // public/ui/components/simulator.js
 
 let ws = null;
@@ -74,7 +76,7 @@ function sendInput(type, value) {
   }
   
   const message = {
-    type: 'input',
+    type: MessageType.D2S_INPUT,
     data: {
       type,
       value,

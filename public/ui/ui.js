@@ -1,28 +1,9 @@
 // public/ui/ui.js
 
+import { MessageType } from '../../shared/protocol.js';
 import { loadDevices } from './components/devices.js';
 import { loadApps } from './components/apps.js';
 import { initSimulator } from './components/simulator.js';
-
-const API_BASE = '';
-
-// Reload apps
-async function reloadApps() {
-  try {
-    const response = await fetch(`${API_BASE}/api/apps/reload`, {
-      method: 'POST'
-    });
-    const result = await response.json();
-    
-    if (result.success) {
-      // The apps-changed event will be broadcast via WebSocket,
-      // which will trigger loadApps()
-      console.log('Reload command sent');
-    }
-  } catch (err) {
-    console.error('Error reloading apps:', err);
-  }
-}
 
 // Connect to UI WebSocket for real-time updates
 function connectUI() {
@@ -38,10 +19,10 @@ function connectUI() {
   uiWs.onmessage = (event) => {
     try {
       const message = JSON.parse(event.data);
-      if (message.type === 'devices-changed') {
+      if (message.type === MessageType.S2U_DEVICES_CHANGED) {
         console.log('Device list changed, reloading...');
         loadDevices();
-      } else if (message.type === 'apps-changed') {
+      } else if (message.type === MessageType.S2U_APPS_CHANGED) {
         console.log('App list changed, reloading...');
         loadApps();
       }
@@ -66,7 +47,5 @@ document.addEventListener('DOMContentLoaded', () => {
   loadApps();
   initSimulator();
   
-  document.getElementById('reload-apps').addEventListener('click', reloadApps);
-
   connectUI();
 });

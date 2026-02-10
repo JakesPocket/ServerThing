@@ -1,3 +1,5 @@
+const { InputType, ButtonValue, DialValue } = require('../../shared/protocol.js');
+
 // Counter App - Example app for ServerThing
 // Demonstrates app structure with UI and input handling
 
@@ -20,25 +22,25 @@ module.exports = {
     let changed = false;
 
     // Handle button presses
-    if (input.type === 'button') {
-      if (input.value === 'preset1') {
+    if (input.type === InputType.BUTTON) {
+      if (input.value === ButtonValue.PRESET_1) {
         count++;
         changed = true;
-      } else if (input.value === 'preset2') {
+      } else if (input.value === ButtonValue.PRESET_2) {
         count--;
         changed = true;
-      } else if (input.value === 'preset3') {
+      } else if (input.value === ButtonValue.PRESET_3) {
         count = 0;
         changed = true;
       }
     }
 
     // Handle dial turns
-    if (input.type === 'dial') {
-      if (input.value === 'right') {
+    if (input.type === InputType.DIAL) {
+      if (input.value === DialValue.RIGHT) {
         count++;
         changed = true;
-      } else if (input.value === 'left') {
+      } else if (input.value === DialValue.LEFT) {
         count--;
         changed = true;
       }

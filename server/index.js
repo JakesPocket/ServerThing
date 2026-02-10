@@ -3,6 +3,7 @@ const { WebSocketServer } = require('ws');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
+const { MessageType } = require('../shared/protocol.js');
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = path.join(__dirname, '..', 'data');
@@ -299,11 +300,11 @@ wssDevice.on('connection', (ws, request) => {
   console.log(`Device connected: ${deviceId}`);
   deviceConnections.set(deviceId, ws);
   deviceManager.updateDevice(deviceId, { connected: true });
-  broadcastUI({ type: 'devices-changed' });
+  broadcastUI({ type: MessageType.S2U_DEVICES_CHANGED });
 
   // Send initial state
   ws.send(JSON.stringify({
-    type: 'connected',
+    type: MessageType.S2D_CONNECTED,
     deviceId,
     apps: appManager.getApps()
   }));
@@ -312,7 +313,7 @@ wssDevice.on('connection', (ws, request) => {
     try {
       const message = JSON.parse(data.toString());
       
-      if (message.type === 'input') {
+      if (message.type === MessageType.D2S_INPUT) {
         // Store input event
         deviceManager.addInput(deviceId, message.data);
         
@@ -322,7 +323,7 @@ wssDevice.on('connection', (ws, request) => {
           const response = appManager.handleInput(app.id, deviceId, message.data);
           if (response) {
             ws.send(JSON.stringify({
-              type: 'app-response',
+              type: MessageType.S2D_APP_RESPONSE,
               appId: app.id,
               data: response
             }));
@@ -331,7 +332,7 @@ wssDevice.on('connection', (ws, request) => {
         
         // Echo back to device
         ws.send(JSON.stringify({
-          type: 'input-received',
+          type: MessageType.S2D_INPUT_RECEIVED,
           data: message.data
         }));
       }
@@ -344,7 +345,7 @@ wssDevice.on('connection', (ws, request) => {
     console.log(`Device disconnected: ${deviceId}`);
     deviceConnections.delete(deviceId);
     deviceManager.updateDevice(deviceId, { connected: false });
-    broadcastUI({ type: 'devices-changed' });
+    broadcastUI({ type: MessageType.S2U_DEVICES_CHANGED });
   });
 
   ws.on('error', (err) => {
@@ -370,12 +371,12 @@ app.post('/api/apps/:appId/enable', (req, res) => {
     deviceConnections.forEach(ws => {
       if (ws.readyState === 1) { // WebSocket.OPEN
         ws.send(JSON.stringify({
-          type: 'app-enabled',
+          type: MessageType.S2D_APP_ENABLED,
           appId
         }));
       }
     });
-    broadcastUI({ type: 'apps-changed' });
+    broadcastUI({ type: MessageType.S2U_APPS_CHANGED });
   } else {
     res.status(404).json({ success: false, message: 'App not found' });
   }
@@ -390,12 +391,12 @@ app.post('/api/apps/:appId/disable', (req, res) => {
     deviceConnections.forEach(ws => {
       if (ws.readyState === 1) { // WebSocket.OPEN
         ws.send(JSON.stringify({
-          type: 'app-disabled',
+          type: MessageType.S2D_APP_DISABLED,
           appId
         }));
       }
     });
-    broadcastUI({ type: 'apps-changed' });
+    broadcastUI({ type: MessageType.S2U_APPS_CHANGED });
   } else {
     res.status(404).json({ success: false, message: 'App not found' });
   }

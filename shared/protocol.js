@@ -1,66 +1,72 @@
-/*
-  Protocol for WebSocket communication between devices and the server.
+// Protocol constants shared between server, device, and UI.
 
-  All messages are JSON objects with a 'type' field.
-*/
+const MessageType = {
+  // Server to Device
+  S2D_CONNECTED: 'connected',
+  S2D_APP_ENABLED: 'app-enabled',
+  S2D_APP_DISABLED: 'app-disabled',
+  S2D_APPS_RELOADED: 'apps-reloaded',
+  S2D_APP_RESPONSE: 'app-response',
+  S2D_INPUT_RECEIVED: 'input-received',
 
-// --- Server to Device ---
-
-// Sent when the device first connects
-const connect = {
-  type: 'connected',
-  deviceId: 'string',
-  apps: [{
-    id: 'string',
-    name: 'string',
-    enabled: 'boolean'
-  }]
+  // Device to Server
+  D2S_INPUT: 'input',
+  
+  // Server to UI
+  S2U_DEVICES_CHANGED: 'devices-changed',
+  S2U_APPS_CHANGED: 'apps-changed',
 };
 
-// Sent when an app is enabled
-const appEnabled = {
-  type: 'app-enabled',
-  appId: 'string'
+const InputType = {
+  BUTTON: 'button',
+  DIAL: 'dial',
+  TOUCH: 'touch',
 };
 
-// Sent when an app is disabled
-const appDisabled = {
-  type: 'app-disabled',
-  appId: 'string'
+const ButtonValue = {
+  PRESET_1: 'preset1',
+  PRESET_2: 'preset2',
+  PRESET_3: 'preset3',
+  PRESET_4: 'preset4',
 };
 
-// Sent when apps are reloaded
-const appsReloaded = {
-  type: 'apps-reloaded',
-  apps: [{
-    id: 'string',
-    name: 'string',
-    enabled: 'boolean'
-  }]
+const DialValue = {
+  LEFT: 'left',
+  RIGHT: 'right',
 };
 
-// Response from an app to a device input
-const appResponse = {
-  type: 'app-response',
-  appId: 'string',
-  data: 'any'
+const TouchValue = {
+  SWIPE_LEFT: 'swipe-left',
+  SWIPE_RIGHT: 'swipe-right',
+  TAP: 'tap',
 };
 
-// Confirmation that an input was received
-const inputReceived = {
-  type: 'input-received',
-  data: 'any'
-};
+// This file is a CommonJS module, so we use module.exports
+// This makes it easy to share between Node.js (server) and browser (with a bundler, or by manually including)
+// For this project, we will use it as a CJS module on the server and an ES module on the client.
+// This is a bit of a hack, but it's the simplest solution without introducing a build step.
+try {
+  module.exports = {
+    MessageType,
+    InputType,
+    ButtonValue,
+    DialValue,
+    TouchValue
+  };
+} catch (e) {
+  // We are in a browser environment, do nothing.
+  // The file will be loaded as an ES module.
+}
 
-
-// --- Device to Server ---
-
-// Sent when a device sends an input event
-const input = {
-  type: 'input',
-  data: {
-    type: 'string', // e.g., 'button', 'dial', 'touch'
-    value: 'any', // e.g., 'preset1', 'left', { x: 10, y: 20 }
-    timestamp: 'number'
-  }
+// In a real project, you would use a bundler like webpack or rollup to handle this.
+// But for this project, we want to keep it simple.
+// The browser will use this file as an ES module, and the server will use it as a CommonJS module.
+// So we need to have both `module.exports` and `export`.
+// This is not ideal, but it works for this simple case.
+export {
+  MessageType,
+  InputType,
+  ButtonValue,
+  DialValue,
+  TouchValue
 };
