@@ -160,5 +160,42 @@
         "timestamp": 1770698534347
       }
     ]
+  },
+  {
+    "id": "carthing-1770781405591",
+    "connected": false,
+    "lastSeen": 1770781462875,
+    "inputs": [
+      {
+        "type": "dial",
+        "value": "right",
+        "timestamp": 1770781418558
+      },
+      {
+        "type": "dial",
+        "value": "left",
+        "timestamp": 1770781426282
+      },
+      {
+        "type": "button",
+        "value": "dial-click",
+        "timestamp": 1770781426285
+      },
+      {
+        "type": "button",
+        "value": "back",
+        "timestamp": 1770781435747
+      },
+      {
+        "type": "dial",
+        "value": "right",
+        "timestamp": 1770781443225
+      },
+      {
+        "type": "button",
+        "value": "dial-click",
+        "timestamp": 1770781443231
+      }
+    ]
   }
 ]
