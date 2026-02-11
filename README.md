@@ -6,7 +6,8 @@ Headless Node.js server for embedded devices (Superbird/Car Thing). Provides a w
 
 - 🚀 **Lightweight** - Minimal Node.js server with no database, no auth, no Electron
 - 🔌 **WebSocket Communication** - Real-time device input handling (button, dial, touch events)
-- 🎨 **Web UI** - Clean control panel for monitoring devices and managing apps
+- 🎨 **System UI Shell** - Embedded-style UI runtime for Car Thing (800x480) - never reloads!
+- 🖥️ **Control Panel** - Clean web UI for monitoring devices and managing apps
 - 🔧 **Plugin System** - Install server-side apps in `server/apps/` directory
 - 🔄 **Hot Reload** - Enable/disable apps without server restart
 - 📱 **Device Simulator** - Built-in simulator for testing without hardware
@@ -23,7 +24,8 @@ npm start
 
 Server will start on http://localhost:3000
 
-- **Web UI**: http://localhost:3000/ui
+- **System UI Shell** (for Car Thing): http://localhost:3000/shell/
+- **Control Panel** (for desktop): http://localhost:3000/ui
 - **WebSocket**: ws://localhost:3000/ws/device
 
 ## Architecture
@@ -34,12 +36,19 @@ ServerThing/
 │   ├── index.js           # Main server (HTTP + WebSocket)
 │   └── apps/              # Installable apps
 │       └── counter/       # Example counter app
-│           └── index.js
+│           ├── index.js   # Server-side logic
+│           └── public/    # App UI (served in shell)
 ├── public/
-│   └── ui/                # Web UI files
+│   ├── shell/             # System UI Shell (for Car Thing)
+│   │   ├── index.html
+│   │   ├── shell.css
+│   │   └── shell.js
+│   └── ui/                # Control Panel (for desktop)
 │       ├── index.html
 │       ├── style.css
-│       └── app.js
+│       └── ui.js
+├── shared/
+│   └── protocol.js        # Shared message types
 └── package.json
 ```
 
@@ -67,6 +76,34 @@ ws.onmessage = (event) => {
   console.log('Server message:', message);
 };
 ```
+
+## System UI Shell
+
+The **System UI Shell** (`/shell/`) is a permanent, embedded-style UI runtime designed specifically for the Spotify Car Thing (800x480 display).
+
+### Key Features
+
+- **Never Reloads**: The shell loads once and runs permanently - apps are loaded/unloaded within it
+- **Hardware-Integrated**: Receives all input (rotary encoder, buttons) via WebSocket
+- **Full-Screen Apps**: Apps run in isolated iframes with complete viewport control
+- **Low Memory**: Optimized for very limited RAM environments
+- **Instant Navigation**: Smooth transitions with dial-based navigation
+
+### Usage
+
+1. Point your Car Thing browser to: `http://your-server:3000/shell/`
+2. Use the rotary dial to navigate between apps
+3. Click the dial to launch an app
+4. Press back to open navigation menu (Home, Close App)
+
+### Keyboard Controls (for testing)
+
+- **Arrow Left/Right**: Turn dial
+- **Enter**: Dial click
+- **Escape**: Back button
+- **1-4**: Preset buttons
+
+For detailed documentation, see [SHELL_GUIDE.md](SHELL_GUIDE.md).
 
 ## Creating Apps
 
