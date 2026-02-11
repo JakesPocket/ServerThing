@@ -32,3 +32,11 @@ Goal:
 - Maintain a clean separation of concerns
 - Ensure apps can be added, removed, or updated safely
 - Keep WebSocket input/output and device state handling robust and isolated from app/UI logic
+
+Apps:
+- Apps are server-side modules
+- Apps can be enabled/disabled
+- Apps expose UI fragments and logic
+- No authentication or databases
+
+Keep device protocol, state management, and app framework separate.
