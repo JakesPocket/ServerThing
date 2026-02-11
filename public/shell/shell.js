@@ -22,6 +22,7 @@ class ShellRuntime {
       statusConnection: document.getElementById('status-connection'),
       statusAppName: document.getElementById('status-app-name'),
       statusTime: document.getElementById('status-time'),
+      backButton: document.getElementById('back-button'),
       homeScreen: document.getElementById('home-screen'),
       appGrid: document.getElementById('app-grid'),
       appContainer: document.getElementById('app-container'),
@@ -47,6 +48,36 @@ class ShellRuntime {
     document.addEventListener('touchstart', e => {
       if (e.touches.length > 1) e.preventDefault();
     }, { passive: false });
+    
+    // Task 1 & 4: Add touch/pointer support for home screen
+    this.elements.appGrid.addEventListener('pointerdown', (e) => {
+      const appTile = e.target.closest('.app-tile');
+      if (appTile) {
+        const appId = appTile.dataset.appId;
+        const enabledApps = this.apps.filter(app => app.enabled);
+        const index = enabledApps.findIndex(app => app.id === appId);
+        
+        if (index !== -1) {
+          // Update focused index
+          this.selectedIndex = index;
+          this.renderHomeScreen();
+          
+          // Add pressed state temporarily
+          appTile.classList.add('pressed');
+          setTimeout(() => appTile.classList.remove('pressed'), 150);
+          
+          // Launch app on tap
+          this.launchApp(appId);
+        }
+      }
+    });
+    
+    // Task 2: Add back button touch handler
+    this.elements.backButton.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      // Trigger same BACK logic as hardware button
+      this.showHomeScreen();
+    });
     
     console.log('[Shell] Shell initialized');
   }
@@ -182,6 +213,7 @@ class ShellRuntime {
     this.elements.homeScreen.classList.add('active');
     this.elements.appContainer.classList.remove('active');
     this.elements.statusAppName.textContent = 'Home';
+    this.elements.backButton.classList.add('hidden');
     this.currentAppId = null;
     this.selectedIndex = 0;
     this.renderHomeScreen();
@@ -237,6 +269,7 @@ class ShellRuntime {
     this.elements.homeScreen.classList.remove('active');
     this.elements.appContainer.classList.add('active');
     this.elements.statusAppName.textContent = app.name || appId;
+    this.elements.backButton.classList.remove('hidden');
     this.currentAppId = appId;
   }
 
