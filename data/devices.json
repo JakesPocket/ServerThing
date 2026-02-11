@@ -2,7 +2,7 @@
   {
     "id": "simulator",
     "connected": false,
-    "lastSeen": 1770701254650,
+    "lastSeen": 1770781317312,
     "inputs": [
       {
         "type": "button",
@@ -158,6 +158,91 @@
         "type": "dial",
         "value": "left",
         "timestamp": 1770698534347
+      },
+      {
+        "type": "button",
+        "value": "settings",
+        "timestamp": 1770781283558
+      },
+      {
+        "type": "button",
+        "value": "settings",
+        "timestamp": 1770781284672
+      },
+      {
+        "type": "button",
+        "value": "preset4",
+        "timestamp": 1770781288555
+      },
+      {
+        "type": "button",
+        "value": "preset3",
+        "timestamp": 1770781290223
+      },
+      {
+        "type": "button",
+        "value": "preset2",
+        "timestamp": 1770781290922
+      },
+      {
+        "type": "button",
+        "value": "preset1",
+        "timestamp": 1770781291390
+      },
+      {
+        "type": "dial",
+        "value": "left",
+        "timestamp": 1770781292123
+      },
+      {
+        "type": "dial",
+        "value": "right",
+        "timestamp": 1770781292691
+      },
+      {
+        "type": "button",
+        "value": "dial-click",
+        "timestamp": 1770781293091
+      },
+      {
+        "type": "button",
+        "value": "back",
+        "timestamp": 1770781293707
+      },
+      {
+        "type": "touch",
+        "value": "swipe-left",
+        "timestamp": 1770781295106
+      },
+      {
+        "type": "touch",
+        "value": "swipe-right",
+        "timestamp": 1770781295592
+      },
+      {
+        "type": "touch",
+        "value": "tap",
+        "timestamp": 1770781295956
+      },
+      {
+        "type": "touch",
+        "value": "swipe-left",
+        "timestamp": 1770781297257
+      },
+      {
+        "type": "touch",
+        "value": "swipe-right",
+        "timestamp": 1770781303674
+      },
+      {
+        "type": "touch",
+        "value": "swipe-left",
+        "timestamp": 1770781305640
+      },
+      {
+        "type": "button",
+        "value": "dial-click",
+        "timestamp": 1770781315658
       }
     ]
   }
