@@ -329,21 +329,25 @@ class ShellRuntime {
     if (!this.elements.navOverlay.classList.contains('hidden')) {
       // Navigate in nav menu
       const items = this.elements.navOverlay.querySelectorAll('.nav-item');
-      if (value === 'right') {
-        this.navSelectedIndex = (this.navSelectedIndex + 1) % items.length;
-      } else if (value === 'left') {
-        this.navSelectedIndex = (this.navSelectedIndex - 1 + items.length) % items.length;
+      if (items.length > 0) {
+        if (value === 'right') {
+          this.navSelectedIndex = (this.navSelectedIndex + 1) % items.length;
+        } else if (value === 'left') {
+          this.navSelectedIndex = (this.navSelectedIndex - 1 + items.length) % items.length;
+        }
+        this.updateNavSelection();
       }
-      this.updateNavSelection();
     } else if (this.elements.homeScreen.classList.contains('active')) {
       // Navigate in app grid
       const enabledApps = this.apps.filter(app => app.enabled);
-      if (value === 'right') {
-        this.selectedIndex = (this.selectedIndex + 1) % enabledApps.length;
-      } else if (value === 'left') {
-        this.selectedIndex = (this.selectedIndex - 1 + enabledApps.length) % enabledApps.length;
+      if (enabledApps.length > 0) {
+        if (value === 'right') {
+          this.selectedIndex = (this.selectedIndex + 1) % enabledApps.length;
+        } else if (value === 'left') {
+          this.selectedIndex = (this.selectedIndex - 1 + enabledApps.length) % enabledApps.length;
+        }
+        this.renderHomeScreen();
       }
-      this.renderHomeScreen();
     }
   }
 

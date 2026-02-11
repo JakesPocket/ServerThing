@@ -1,5 +1,12 @@
 /* System UI Shell - Optimized for 800x480 Car Thing Display */
 
+:root {
+  --shell-width: 800px;
+  --shell-height: 480px;
+  --status-bar-height: 30px;
+  --app-viewport-height: 450px;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -7,8 +14,8 @@
 }
 
 html, body {
-  width: 800px;
-  height: 480px;
+  width: var(--shell-width);
+  height: var(--shell-height);
   overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background: #000;
@@ -27,7 +34,7 @@ html, body {
 
 /* Status Bar - Always visible at top */
 #status-bar {
-  height: 30px;
+  height: var(--status-bar-height);
   background: rgba(0, 0, 0, 0.9);
   border-bottom: 1px solid #333;
   display: flex;
