@@ -81,45 +81,12 @@
   <div class="controls">
     <h3>Controls</h3>
     <p>
-      Preset 1 / Dial Right: +1<br>
-      Preset 2 / Dial Left: -1<br>
-      Preset 3: Reset
+      Dial Right: +1<br>
+      Dial Left: -1<br>
+      Dial Click: Reset
     </p>
   </div>
 
-  <script type="module">
-    // Counter App - Shell-integrated version
-    // Receives messages from shell via postMessage
-    let currentCount = 0;
-
-    const counterValueEl = document.getElementById('counter-value');
-
-    function updateDisplay(count) {
-      currentCount = count;
-      counterValueEl.textContent = count;
-      
-      // Animation effect
-      counterValueEl.classList.add('changed');
-      setTimeout(() => {
-        counterValueEl.classList.remove('changed');
-      }, 200);
-    }
-
-    // Listen for messages from shell
-    window.addEventListener('message', (event) => {
-      if (event.data.type === 'server-message') {
-        const message = event.data.message;
-        
-        // Handle app-response from counter app
-        if (message.type === 'app-response' && message.appId === 'counter') {
-          if (message.data && typeof message.data.count === 'number') {
-            updateDisplay(message.data.count);
-          }
-        }
-      }
-    });
-
-    console.log('Counter app loaded in shell');
-  </script>
+  <script src="app.js" type="module"></script>
 </body>
 </html>

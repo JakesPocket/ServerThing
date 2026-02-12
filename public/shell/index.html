@@ -11,10 +11,15 @@
   <div id="shell-container">
     <!-- Status Bar -->
     <div id="status-bar">
-      <span id="status-connection">●</span>
-      <span id="status-app-name">Home</span>
-      <button id="back-button" class="hidden" aria-label="Back to Home">⌂</button>
-      <span id="status-time">--:--</span>
+      <div class="status-bar-left">
+        <button id="sys-nav-button"></button>
+      </div>
+      <div class="status-bar-center">
+        <span id="status-time">--:--</span>
+      </div>
+      <div class="status-bar-right">
+        <span id="status-connection">●</span>
+      </div>
     </div>
 
     <!-- App Container - Full screen apps render here -->

@@ -3,434 +3,225 @@
 
 import { MessageType, InputType } from '/shared/protocol.js';
 
-/**
- * ShellRuntime - The permanent UI shell that never reloads
- * Manages app lifecycle, hardware input, and navigation
- */
 class ShellRuntime {
   constructor() {
     this.ws = null;
-    this.deviceId = 'carthing-' + Date.now();
-    this.apps = [];
-    this.currentAppId = null;
-    this.selectedIndex = 0;
-    this.navSelectedIndex = 0;
-    this.reconnectAttempts = 0;
-    this.reconnectDelay = 1000;
+    this.deviceId = `shell-${Date.now()}`;
+    this.apps = [
+      { id: 'counter', name: 'Counter', enabled: true },
+      { id: 'makemkv-key', name: 'MakeMKV Manager', enabled: true }
+    ];
+    this.currentApp = { id: null, iframe: null, atRoot: true };
+    this.interactionMode = 'dial';
+    this.focusedAppIndex = 0;
     
+    // Timer for Long Press
+    this.backButtonTimer = null;
+    this.isLongPress = false;
+
     this.elements = {
-      statusConnection: document.getElementById('status-connection'),
-      statusAppName: document.getElementById('status-app-name'),
+      statusBar: document.getElementById('status-bar'),
+      sysNavButton: document.getElementById('sys-nav-button'),
       statusTime: document.getElementById('status-time'),
-      backButton: document.getElementById('back-button'),
+      statusConnection: document.getElementById('status-connection'),
       homeScreen: document.getElementById('home-screen'),
       appGrid: document.getElementById('app-grid'),
       appContainer: document.getElementById('app-container'),
-      navOverlay: document.getElementById('nav-overlay'),
-      loading: document.getElementById('loading')
+      loading: document.getElementById('loading'),
     };
 
     this.init();
   }
 
-  async init() {
-    console.log('[Shell] Initializing System UI Shell');
-    
-    // Start clock
-    this.updateClock();
-    setInterval(() => this.updateClock(), 1000);
-    
-    // Connect to server
-    this.connect();
-    
-    // Prevent context menu and long-press behaviors
-    document.addEventListener('contextmenu', e => e.preventDefault());
-    document.addEventListener('touchstart', e => {
-      if (e.touches.length > 1) e.preventDefault();
-    }, { passive: false });
-    
-    // Task 1 & 4: Add touch/pointer support for home screen
-    this.elements.appGrid.addEventListener('pointerdown', (e) => {
-      const appTile = e.target.closest('.app-tile');
-      if (appTile) {
-        const appId = appTile.dataset.appId;
-        const enabledApps = this.apps.filter(app => app.enabled);
-        const index = enabledApps.findIndex(app => app.id === appId);
-        
-        if (index !== -1) {
-          // Update focused index
-          this.selectedIndex = index;
-          this.renderHomeScreen();
-          
-          // Add pressed state temporarily
-          appTile.classList.add('pressed');
-          setTimeout(() => appTile.classList.remove('pressed'), 150);
-          
-          // Launch app on tap
-          this.launchApp(appId);
-        }
+  init() {
+    console.log('[Shell] Initializing Runtime');
+    this.updateBodyDataset(); 
+    this.startClock();
+    this.addEventListeners();
+    this.renderAppGrid();
+    window.focus();
+  }
+
+  setInteractionMode(mode) {
+    if (this.interactionMode === mode) return;
+    this.interactionMode = mode;
+    this.updateBodyDataset();
+  }
+
+  updateBodyDataset() {
+    document.body.setAttribute('data-interaction-mode', this.interactionMode);
+  }
+
+  addEventListeners() {
+    document.body.addEventListener('pointerdown', () => {
+      this.setInteractionMode('touch');
+      window.focus();
+    });
+
+    window.addEventListener('blur', () => {
+      setTimeout(() => window.focus(), 150);
+    });
+
+    window.addEventListener('keydown', (e) => {
+      let input = null;
+      switch (e.key) {
+        case 'ArrowRight': input = { type: InputType.DIAL, value: 'right' }; break;
+        case 'ArrowLeft':  input = { type: InputType.DIAL, value: 'left' }; break;
+        case 'Enter':      input = { type: InputType.BUTTON, value: 'dial_click_down' }; break;
+        case 'Backspace':
+        case 'Escape':
+          this.handleHardwareInput({ type: InputType.BUTTON, value: 'back_button_down' });
+          setTimeout(() => this.handleHardwareInput({ type: InputType.BUTTON, value: 'back_button_up' }), 50);
+          return;
+      }
+      if (input) {
+        e.preventDefault();
+        this.handleHardwareInput(input);
       }
     });
-    
-    // Task 2: Add back button touch handler
-    this.elements.backButton.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      // Trigger same BACK logic as hardware button
-      this.showHomeScreen();
-    });
-    
-    console.log('[Shell] Shell initialized');
+
+    this.elements.sysNavButton.addEventListener('pointerdown', () => this.handleBackButtonDown());
+    this.elements.sysNavButton.addEventListener('pointerup', () => this.handleBackButtonUp());
+    window.addEventListener('message', (event) => this.handleIframeMessage(event));
   }
 
-  updateClock() {
-    const now = new Date();
-    const hours = String(now.getHours()).padStart(2, '0');
-    const minutes = String(now.getMinutes()).padStart(2, '0');
-    this.elements.statusTime.textContent = `${hours}:${minutes}`;
-  }
+  handleHardwareInput(input) {
+    this.setInteractionMode('dial');
 
-  connect() {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/device?id=${this.deviceId}`;
-    
-    console.log(`[Shell] Connecting to ${wsUrl}`);
-    this.showLoading('Connecting...');
-    
-    this.ws = new WebSocket(wsUrl);
-    
-    this.ws.onopen = () => {
-      console.log('[Shell] WebSocket connected');
-      this.elements.statusConnection.classList.add('connected');
-      this.reconnectAttempts = 0;
-      this.hideLoading();
-    };
-    
-    this.ws.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        this.handleServerMessage(message);
-      } catch (err) {
-        console.error('[Shell] Error parsing message:', err);
+    // Preset Shortcuts
+    if (input.type === InputType.BUTTON) {
+      const val = String(input.value).toLowerCase();
+      if (val === 'preset_1') return this.launchApp('counter');
+      if (val === 'preset_2') return this.launchApp('makemkv-key');
+      if (val === 'preset_4') return this.returnToHomeGrid();
+      
+      // Handle the physical back button from ServerThing
+      if (val === 'back_button_down') return this.handleBackButtonDown();
+      if (val === 'back_button_up') return this.handleBackButtonUp();
+    }
+
+    if (!this.currentApp.id) {
+      const enabledApps = this.apps.filter(app => app.enabled);
+      if (input.type === InputType.DIAL) {
+        if (input.value === 'right') this.focusedAppIndex = (this.focusedAppIndex + 1) % enabledApps.length;
+        else if (input.value === 'left') this.focusedAppIndex = (this.focusedAppIndex - 1 + enabledApps.length) % enabledApps.length;
+        this.renderAppGrid();
+      } else if (input.value === 'dial_click_down') {
+        const app = enabledApps[this.focusedAppIndex];
+        if (app) this.launchApp(app.id);
       }
-    };
-    
-    this.ws.onclose = () => {
-      console.log('[Shell] WebSocket disconnected');
-      this.elements.statusConnection.classList.remove('connected');
-      
-      // Exponential backoff reconnection
-      this.reconnectAttempts++;
-      const delay = Math.min(30000, this.reconnectDelay * Math.pow(2, this.reconnectAttempts));
-      console.log(`[Shell] Reconnecting in ${delay}ms...`);
-      setTimeout(() => this.connect(), delay);
-    };
-    
-    this.ws.onerror = (err) => {
-      console.error('[Shell] WebSocket error:', err);
-    };
-  }
-
-  handleServerMessage(message) {
-    console.log('[Shell] Received:', message.type);
-    
-    switch (message.type) {
-      case MessageType.S2D_CONNECTED:
-        console.log('[Shell] Connection confirmed, device ID:', message.deviceId);
-        this.deviceId = message.deviceId;
-        this.apps = message.apps || [];
-        this.renderHomeScreen();
-        break;
-        
-      case MessageType.S2D_APP_ENABLED:
-      case MessageType.S2D_APP_DISABLED:
-      case MessageType.S2D_APPS_RELOADED:
-        // Fetch updated apps
-        this.fetchApps();
-        break;
-        
-      case MessageType.S2D_APP_RESPONSE:
-        // Forward to active app iframe if present
-        this.forwardToApp(message);
-        break;
-        
-      case MessageType.S2D_INPUT_RECEIVED:
-        // Input acknowledged
-        break;
-    }
-  }
-
-  async fetchApps() {
-    try {
-      const response = await fetch('/api/apps');
-      this.apps = await response.json();
-      this.renderHomeScreen();
-    } catch (err) {
-      console.error('[Shell] Failed to fetch apps:', err);
-    }
-  }
-
-  sendInput(type, value) {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      const message = {
-        type: MessageType.D2S_INPUT,
-        data: {
-          type,
-          value,
-          timestamp: Date.now()
-        }
-      };
-      this.ws.send(JSON.stringify(message));
-      console.log('[Shell] Sent input:', type, value);
-    }
-  }
-
-  renderHomeScreen() {
-    const enabledApps = this.apps.filter(app => app.enabled);
-    
-    this.elements.appGrid.innerHTML = '';
-    
-    if (enabledApps.length === 0) {
-      this.elements.appGrid.innerHTML = '<p style="color: #666;">No apps available</p>';
-      return;
-    }
-    
-    enabledApps.forEach((app, index) => {
-      const tile = document.createElement('div');
-      tile.className = 'app-tile';
-      if (index === this.selectedIndex) {
-        tile.classList.add('selected');
-      }
-      tile.innerHTML = `
-        <div class="app-tile-name">${app.name || app.id}</div>
-        <div class="app-tile-desc">${app.description || ''}</div>
-      `;
-      tile.dataset.appId = app.id;
-      this.elements.appGrid.appendChild(tile);
-    });
-  }
-
-  showHomeScreen() {
-    this.elements.homeScreen.classList.add('active');
-    this.elements.appContainer.classList.remove('active');
-    this.elements.statusAppName.textContent = 'Home';
-    this.elements.backButton.classList.add('hidden');
-    this.currentAppId = null;
-    this.selectedIndex = 0;
-    this.renderHomeScreen();
-  }
-
-  async launchApp(appId) {
-    console.log('[Shell] Launching app:', appId);
-    this.showLoading('Loading app...');
-    
-    const app = this.apps.find(a => a.id === appId);
-    if (!app) {
-      console.error('[Shell] App not found:', appId);
-      this.hideLoading();
-      return;
-    }
-    
-    // Clear previous app
-    this.elements.appContainer.innerHTML = '';
-    
-    // Check if app has a public UI
-    if (app.hasPublicUI) {
-      // Load app in iframe
-      const iframe = document.createElement('iframe');
-      iframe.src = `/apps/${appId}/index.html`;
-      iframe.sandbox = 'allow-scripts allow-same-origin';
-      
-      iframe.onload = () => {
-        console.log('[Shell] App loaded:', appId);
-        this.hideLoading();
-      };
-      
-      iframe.onerror = () => {
-        console.error('[Shell] Failed to load app:', appId);
-        this.hideLoading();
-        this.showHomeScreen();
-      };
-      
-      this.elements.appContainer.appendChild(iframe);
     } else {
-      // Server-only app, just show placeholder
-      this.elements.appContainer.innerHTML = `
-        <div style="display: flex; align-items: center; justify-content: center; height: 100%; background: #1a1a2e;">
-          <div style="text-align: center;">
-            <h2 style="font-size: 32px; margin-bottom: 20px;">${app.name}</h2>
-            <p style="color: #888;">Server-side app running</p>
-          </div>
-        </div>
-      `;
-      this.hideLoading();
+      this.postMessageToApp({ type: 'HARDWARE_EVENT', data: input });
     }
+  }
+
+  handleBackButtonDown() {
+    this.isLongPress = false;
+    clearTimeout(this.backButtonTimer);
     
-    // Switch to app view
+    // Start timer for 600ms (standard for "long press")
+    this.backButtonTimer = setTimeout(() => {
+      this.isLongPress = true;
+      console.log('[Shell] Long Press detected: Returning Home');
+      this.returnToHomeGrid();
+    }, 600);
+  }
+
+  handleBackButtonUp() {
+    clearTimeout(this.backButtonTimer);
+    
+    // If it wasn't a long press, do the normal back action
+    if (!this.isLongPress) {
+      console.log('[Shell] Short Press detected: Standard Back');
+      if (this.currentApp.id) {
+        // If at the root of an app, the button acts as a "Home" button
+        if (this.currentApp.atRoot) {
+          this.returnToHomeGrid();
+        } else {
+          // Otherwise, send a "Back" command to the app
+          this.postMessageToApp({ type: 'CMD_BACK' });
+        }
+      }
+    }
+    this.isLongPress = false;
+  }
+
+  launchApp(appId) {
+    this.showLoading(true);
+    const iframe = document.createElement('iframe');
+    iframe.src = `/apps/${appId}/index.html`;
+    iframe.onload = () => this.showLoading(false);
+    
+    this.elements.appContainer.innerHTML = '';
+    this.elements.appContainer.appendChild(iframe);
+    this.currentApp = { id: appId, iframe, atRoot: true };
+    
     this.elements.homeScreen.classList.remove('active');
     this.elements.appContainer.classList.add('active');
-    this.elements.statusAppName.textContent = app.name || appId;
-    this.elements.backButton.classList.remove('hidden');
-    this.currentAppId = appId;
+
+    // Ensure nav button is visible and set to home
+    this.elements.sysNavButton.classList.remove('hidden');
+    this.elements.sysNavButton.innerHTML = '⌂';
   }
 
-  forwardToApp(message) {
-    // If app is running in iframe, post message to it
-    const iframe = this.elements.appContainer.querySelector('iframe');
-    if (iframe && iframe.contentWindow) {
-      iframe.contentWindow.postMessage({
-        type: 'server-message',
-        message
-      }, '*');
-    }
+  returnToHomeGrid() {
+    this.elements.appContainer.innerHTML = '';
+    this.currentApp = { id: null, iframe: null, atRoot: true };
+    this.elements.appContainer.classList.remove('active');
+    this.elements.homeScreen.classList.add('active');
+    
+    // Hide nav button on home screen
+    this.elements.sysNavButton.classList.add('hidden');
+    this.renderAppGrid();
   }
 
-  showNavigation() {
-    this.navSelectedIndex = 0;
-    this.updateNavSelection();
-    this.elements.navOverlay.classList.remove('hidden');
-  }
+  renderAppGrid() {
+    const enabledApps = this.apps.filter(app => app.enabled);
+    this.elements.appGrid.innerHTML = enabledApps.map((app, index) => `
+      <div class="app-card ${index === this.focusedAppIndex ? 'focused' : ''}" data-app-id="${app.id}">
+        <div class="app-card-name">${app.name}</div>
+      </div>
+    `).join('');
 
-  hideNavigation() {
-    this.elements.navOverlay.classList.add('hidden');
-  }
-
-  updateNavSelection() {
-    const items = this.elements.navOverlay.querySelectorAll('.nav-item');
-    items.forEach((item, index) => {
-      item.classList.toggle('selected', index === this.navSelectedIndex);
+    // Re-attach event listeners for touch interaction
+    this.elements.appGrid.querySelectorAll('.app-card').forEach(card => {
+      card.addEventListener('pointerdown', (e) => {
+        // Prevent interference with dial navigation
+        e.stopPropagation(); 
+        const appId = card.getAttribute('data-app-id');
+        this.launchApp(appId);
+      });
     });
   }
 
-  executeNavAction() {
-    const items = this.elements.navOverlay.querySelectorAll('.nav-item');
-    const selected = items[this.navSelectedIndex];
-    const action = selected?.dataset.action;
-    
-    this.hideNavigation();
-    
-    switch (action) {
-      case 'home':
-        this.showHomeScreen();
-        break;
-      case 'close-app':
-        if (this.currentAppId) {
-          this.showHomeScreen();
-        }
-        break;
-      case 'current-app':
-        // Do nothing, just close nav
-        break;
+  postMessageToApp(msg) {
+    if (this.currentApp.iframe) {
+      this.currentApp.iframe.contentWindow.postMessage(msg, '*');
     }
   }
 
-  // Hardware Input Handlers
-  handleButton(value) {
-    console.log('[Shell] Button:', value);
-    
-    // Send to server for app processing
-    this.sendInput(InputType.BUTTON, value);
-    
-    // Handle shell-level controls
-    if (value === 'back') {
-      if (this.elements.navOverlay.classList.contains('hidden')) {
-        this.showNavigation();
-      } else {
-        this.hideNavigation();
-      }
-    } else if (value === 'dial-click') {
-      if (!this.elements.navOverlay.classList.contains('hidden')) {
-        this.executeNavAction();
-      } else if (!this.elements.homeScreen.classList.contains('active')) {
-        // In app, forward to app
-      } else {
-        // On home, launch selected app
-        const enabledApps = this.apps.filter(app => app.enabled);
-        if (enabledApps[this.selectedIndex]) {
-          this.launchApp(enabledApps[this.selectedIndex].id);
-        }
-      }
+  handleIframeMessage(event) {
+    const { type, atRoot } = event.data;
+    if (type === 'APP_NAV_STATE') {
+      this.currentApp.atRoot = atRoot;
+      // Update nav button based on app's navigation state
+      this.elements.sysNavButton.innerHTML = atRoot ? '⌂' : '←';
     }
   }
 
-  handleDial(value) {
-    console.log('[Shell] Dial:', value);
-    
-    // Send to server for app processing
-    this.sendInput(InputType.DIAL, value);
-    
-    // Handle shell-level navigation
-    if (!this.elements.navOverlay.classList.contains('hidden')) {
-      // Navigate in nav menu
-      const items = this.elements.navOverlay.querySelectorAll('.nav-item');
-      if (items.length > 0) {
-        if (value === 'right') {
-          this.navSelectedIndex = (this.navSelectedIndex + 1) % items.length;
-        } else if (value === 'left') {
-          this.navSelectedIndex = (this.navSelectedIndex - 1 + items.length) % items.length;
-        }
-        this.updateNavSelection();
-      }
-    } else if (this.elements.homeScreen.classList.contains('active')) {
-      // Navigate in app grid
-      const enabledApps = this.apps.filter(app => app.enabled);
-      if (enabledApps.length > 0) {
-        if (value === 'right') {
-          this.selectedIndex = (this.selectedIndex + 1) % enabledApps.length;
-        } else if (value === 'left') {
-          this.selectedIndex = (this.selectedIndex - 1 + enabledApps.length) % enabledApps.length;
-        }
-        this.renderHomeScreen();
-      }
-    }
+  startClock() {
+    const update = () => {
+      const now = new Date();
+      // Use 'numeric' to avoid leading zero on the hour
+      this.elements.statusTime.textContent = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    };
+    setInterval(update, 1000);
+    update();
   }
 
-  handleTouch(value) {
-    console.log('[Shell] Touch:', value);
-    this.sendInput(InputType.TOUCH, value);
-  }
-
-  showLoading(message = 'Loading...') {
-    this.elements.loading.querySelector('p').textContent = message;
-    this.elements.loading.classList.remove('hidden');
-  }
-
-  hideLoading() {
-    this.elements.loading.classList.add('hidden');
+  showLoading(show) {
+    this.elements.loading.classList.toggle('hidden', !show);
   }
 }
 
-// Initialize shell when DOM is ready
-let shell = null;
-
-document.addEventListener('DOMContentLoaded', () => {
-  shell = new ShellRuntime();
-  
-  // Expose for debugging/testing
-  window.shell = shell;
-});
-
-// Keyboard simulation for development/testing
-document.addEventListener('keydown', (e) => {
-  if (!shell) return;
-  
-  // Dial: Arrow keys
-  if (e.key === 'ArrowLeft') {
-    shell.handleDial('left');
-  } else if (e.key === 'ArrowRight') {
-    shell.handleDial('right');
-  }
-  // Dial click: Enter
-  else if (e.key === 'Enter') {
-    shell.handleButton('dial-click');
-  }
-  // Back: Escape
-  else if (e.key === 'Escape') {
-    shell.handleButton('back');
-  }
-  // Preset buttons: 1-4
-  else if (e.key >= '1' && e.key <= '4') {
-    shell.handleButton(`preset${e.key}`);
-  }
-});
-
-export { shell };
+document.addEventListener('DOMContentLoaded', () => { window.shell = new ShellRuntime(); });
