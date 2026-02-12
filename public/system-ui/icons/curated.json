@@ -1,0 +1,14 @@
+{
+  "movie": true,
+  "music": true,
+  "settings": true,
+  "apps": true,
+  "arrow_back_ios_new": true,
+  "home": true,
+  "play_arrow": true,
+  "pause": true,
+  "skip_next": true,
+  "skip_previous": true,
+  "volume_up": true,
+  "volume_down": true
+}

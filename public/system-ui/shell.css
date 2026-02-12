@@ -1,0 +1,243 @@
+/* system-ui/shell.css */
+/* System UI Shell Styles for ServerThing */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg-primary: #121212;
+  --bg-secondary: #2a2a2a;
+  --text-primary: #ffffff;
+  --text-secondary: #b0b0b0;
+  --accent-color: #1e88e5;
+  --focus-glow: rgba(30, 136, 229, 0.6);
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  width: 800px;
+  height: 480px;
+}
+
+/* Icon System Styles */
+.icon-wrapper {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  cursor: pointer;
+}
+
+.icon-wrapper:hover {
+  transform: scale(1.05);
+}
+
+.icon-wrapper:focus,
+.icon-wrapper:focus-within {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-glow);
+  transform: scale(1.1);
+}
+
+.icon-sprite {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.icon-content {
+  pointer-events: none;
+}
+
+/* Status Bar */
+#status-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 80px;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  z-index: 1000;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.nav-container {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+}
+
+/* Navigation Buttons */
+.nav-button {
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+  outline: none;
+}
+
+.nav-button:hover .icon-wrapper {
+  transform: scale(1.05);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.nav-button:active .icon-wrapper {
+  transform: scale(0.95);
+}
+
+.nav-button:focus {
+  outline: none;
+}
+
+.nav-button:focus .icon-wrapper {
+  box-shadow: 0 0 0 3px var(--focus-glow);
+  transform: scale(1.1);
+}
+
+/* Circular focus state */
+.nav-button::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: transparent;
+  transition: background 0.2s ease;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.nav-button:focus::after {
+  background: rgba(30, 136, 229, 0.2);
+}
+
+/* Touch-friendly sizing */
+.nav-button .icon-wrapper {
+  min-width: 60px;
+  min-height: 60px;
+  touch-action: manipulation;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .nav-button:focus .icon-wrapper {
+    box-shadow: 0 0 0 4px #ffffff;
+  }
+  
+  #status-bar {
+    border-bottom: 2px solid #ffffff;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .icon-wrapper,
+  .nav-button {
+    transition: none;
+  }
+}
+
+/* Main content area */
+#app-container {
+  position: absolute;
+  top: 80px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+}
+
+#app-container iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: var(--bg-primary);
+}
+
+/* App Grid (for home screen) */
+.app-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 20px;
+  padding: 20px;
+  max-width: 100%;
+}
+
+.app-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 15px;
+  background: var(--bg-secondary);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  outline: none;
+  border: 2px solid transparent;
+}
+
+.app-tile:hover {
+  background: #333;
+  transform: translateY(-2px);
+}
+
+.app-tile:focus {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 3px var(--focus-glow);
+  transform: scale(1.05);
+}
+
+.app-tile:active {
+  transform: scale(0.98);
+}
+
+.app-tile-icon {
+  width: 64px;
+  height: 64px;
+}
+
+.app-tile-name {
+  font-size: 14px;
+  font-weight: 500;
+  text-align: center;
+  color: var(--text-primary);
+}
+
+/* Loading state */
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-secondary);
+  font-size: 18px;
+}
+
+/* Accessibility: Focus visible indicators */
+*:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+
+/* Circular navigation support */
+.nav-button:focus,
+.app-tile:focus {
+  /* Will be controlled by JS for circular navigation */
+  scroll-margin: 20px;
+}

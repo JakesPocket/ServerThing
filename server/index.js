@@ -513,6 +513,69 @@ app.post('/api/apps/install', upload.single('app-zip'), (req, res) => {
   }
 });
 
+// Icon cache for Material Symbols
+const iconCache = new Map();
+
+// Icon endpoint - Fetch Google Material Symbols
+app.get('/api/icons', async (req, res) => {
+  const { name, style = 'outlined' } = req.query;
+  
+  if (!name) {
+    return res.status(400).json({ error: 'Icon name is required' });
+  }
+  
+  // Check cache first
+  const cacheKey = `${name}_${style}`;
+  if (iconCache.has(cacheKey)) {
+    res.setHeader('Content-Type', 'image/svg+xml');
+    return res.send(iconCache.get(cacheKey));
+  }
+  
+  try {
+    // Fetch from Google Material Symbols
+    // The URL format for Material Symbols is:
+    // https://fonts.gstatic.com/s/i/short-term/release/materialsymbolsoutlined/{name}/default/48px.svg
+    const baseUrl = 'https://fonts.gstatic.com/s/i/short-term/release';
+    const styleMap = {
+      'outlined': 'materialsymbolsoutlined',
+      'filled': 'materialsymbolsfilled',
+      'rounded': 'materialsymbolsrounded',
+      'sharp': 'materialsymbolssharp'
+    };
+    
+    const stylePath = styleMap[style] || styleMap['outlined'];
+    const iconUrl = `${baseUrl}/${stylePath}/${name}/default/48px.svg`;
+    
+    const https = require('https');
+    const iconData = await new Promise((resolve, reject) => {
+      https.get(iconUrl, (response) => {
+        if (response.statusCode === 404) {
+          reject(new Error('Icon not found'));
+          return;
+        }
+        
+        if (response.statusCode !== 200) {
+          reject(new Error(`HTTP ${response.statusCode}`));
+          return;
+        }
+        
+        let data = '';
+        response.on('data', chunk => data += chunk);
+        response.on('end', () => resolve(data));
+      }).on('error', reject);
+    });
+    
+    // Cache the result
+    iconCache.set(cacheKey, iconData);
+    
+    res.setHeader('Content-Type', 'image/svg+xml');
+    res.send(iconData);
+  } catch (err) {
+    console.error(`Failed to fetch icon ${name}:`, err.message);
+    res.status(404).json({ error: 'Icon not found' });
+  }
+});
+
 // Start server
 server.listen(PORT, () => {
   console.log(`\n========================================`);
