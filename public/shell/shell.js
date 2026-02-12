@@ -3,10 +3,83 @@
 
 import { MessageType, InputType } from '/shared/protocol.js';
 
+// ─── Icon Manager ───────────────────────────────────────────────────────────
+// Centralized icon resolution for apps. Uses Google Material Icons glyphs.
+// Supports auto-mapping by app name and per-app metadata overrides.
+class IconManager {
+  constructor() {
+    // Default icon mapping: lowercase keyword → Material Icon name
+    this.iconMap = {
+      'counter':    'pin',
+      'count':      'pin',
+      'timer':      'timer',
+      'clock':      'schedule',
+      'settings':   'settings',
+      'music':      'album',
+      'audio':      'headphones',
+      'video':      'movie',
+      'photo':      'photo_camera',
+      'file':       'folder',
+      'files':      'folder',
+      'download':   'download',
+      'upload':     'upload',
+      'network':    'wifi',
+      'bluetooth':  'bluetooth',
+      'key':        'vpn_key',
+      'makemkv':    'vpn_key',
+      'disc':       'album',
+      'weather':    'wb_sunny',
+      'home':       'home',
+      'system':     'memory',
+      'monitor':    'monitor_heart',
+      'terminal':   'terminal',
+      'notes':      'edit_note',
+      'chat':       'chat',
+      'map':        'map',
+      'radio':      'radio',
+    };
+
+    // Default palette for auto-assigned backgrounds
+    this.palette = [
+      '#2d7d46', '#1565c0', '#c62828', '#6a1b9a',
+      '#ef6c00', '#00838f', '#4e342e', '#37474f',
+    ];
+  }
+
+  /**
+   * Resolve icon properties for an app.
+   * @param {object} app - { id, name, enabled, iconName?, backgroundColor?, glyphColor? }
+   * @returns {{ glyph: string, bg: string, fg: string }}
+   */
+  resolve(app) {
+    const glyph = app.iconName || this._autoGlyph(app);
+    const bg    = app.backgroundColor || this._autoBg(app.id);
+    const fg    = app.glyphColor || '#ffffff';
+    return { glyph, bg, fg };
+  }
+
+  /** Auto-select a glyph by scanning app id/name against the keyword map. */
+  _autoGlyph(app) {
+    const haystack = `${app.id} ${app.name}`.toLowerCase();
+    for (const [keyword, icon] of Object.entries(this.iconMap)) {
+      if (haystack.includes(keyword)) return icon;
+    }
+    return 'apps'; // Fallback
+  }
+
+  /** Deterministic color from the palette based on app id hash. */
+  _autoBg(id) {
+    let hash = 0;
+    for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
+    return this.palette[Math.abs(hash) % this.palette.length];
+  }
+}
+
 class ShellRuntime {
   constructor() {
     this.ws = null;
     this.deviceId = `shell-${Date.now()}`;
+    this.iconManager = new IconManager();
     this.apps = [
       { id: 'counter', name: 'Counter', enabled: true },
       { id: 'makemkv-key', name: 'MakeMKV Manager', enabled: true }
@@ -22,6 +95,7 @@ class ShellRuntime {
     this.elements = {
       statusBar: document.getElementById('status-bar'),
       sysNavButton: document.getElementById('sys-nav-button'),
+      navIcon: document.getElementById('nav-icon'),
       statusTime: document.getElementById('status-time'),
       statusConnection: document.getElementById('status-connection'),
       homeScreen: document.getElementById('home-screen'),
@@ -159,9 +233,9 @@ class ShellRuntime {
     this.elements.homeScreen.classList.remove('active');
     this.elements.appContainer.classList.add('active');
 
-    // Ensure nav button is visible and set to home
+    // Show nav button — default icon depends on app root state
     this.elements.sysNavButton.classList.remove('hidden');
-    this.elements.sysNavButton.innerHTML = '⌂';
+    this.updateNavIcon(true);
   }
 
   returnToHomeGrid() {
@@ -172,16 +246,23 @@ class ShellRuntime {
     
     // Hide nav button on home screen
     this.elements.sysNavButton.classList.add('hidden');
+    this.elements.sysNavButton.classList.remove('at-root');
     this.renderAppGrid();
   }
 
   renderAppGrid() {
     const enabledApps = this.apps.filter(app => app.enabled);
-    this.elements.appGrid.innerHTML = enabledApps.map((app, index) => `
-      <div class="app-card ${index === this.focusedAppIndex ? 'focused' : ''}" data-app-id="${app.id}">
-        <div class="app-card-name">${app.name}</div>
-      </div>
-    `).join('');
+    this.elements.appGrid.innerHTML = enabledApps.map((app, index) => {
+      const icon = this.iconManager.resolve(app);
+      return `
+        <div class="app-card ${index === this.focusedAppIndex ? 'focused' : ''}" data-app-id="${app.id}">
+          <div class="app-icon" style="background:${icon.bg}; color:${icon.fg}">
+            <span class="material-icons">${icon.glyph}</span>
+          </div>
+          <div class="app-card-name">${app.name}</div>
+        </div>
+      `;
+    }).join('');
 
     // Re-attach event listeners for touch interaction
     this.elements.appGrid.querySelectorAll('.app-card').forEach(card => {
@@ -204,9 +285,17 @@ class ShellRuntime {
     const { type, atRoot } = event.data;
     if (type === 'APP_NAV_STATE') {
       this.currentApp.atRoot = atRoot;
-      // Update nav button based on app's navigation state
-      this.elements.sysNavButton.innerHTML = atRoot ? '⌂' : '←';
+      this.updateNavIcon(atRoot);
     }
+  }
+
+  /**
+   * Swap the status-bar nav icon between home (grid_view) and back (arrow_back_ios_new).
+   * Also toggles a dimmed appearance when the app is at its root level.
+   */
+  updateNavIcon(atRoot) {
+    this.elements.navIcon.textContent = atRoot ? 'grid_view' : 'arrow_back_ios_new';
+    this.elements.sysNavButton.classList.toggle('at-root', atRoot);
   }
 
   startClock() {

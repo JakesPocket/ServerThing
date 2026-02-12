@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>ServerThing Shell</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons&display=swap">
   <link rel="stylesheet" href="/shell/shell.css">
 </head>
 <body>
@@ -12,7 +13,9 @@
     <!-- Status Bar -->
     <div id="status-bar">
       <div class="status-bar-left">
-        <button id="sys-nav-button"></button>
+        <button id="sys-nav-button" class="hidden" aria-label="Navigation">
+          <span class="material-icons" id="nav-icon">arrow_back_ios_new</span>
+        </button>
       </div>
       <div class="status-bar-center">
         <span id="status-time">--:--</span>

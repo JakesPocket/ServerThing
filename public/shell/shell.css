@@ -5,11 +5,26 @@
   --shell-height: 480px;
   --status-bar-height: 40px;
   --accent: #007aff;
-  
-  /* Interaction Variables - Default to Dial Mode */
+
+  /* Icon theming — override for dark mode or per-app accenting */
+  --icon-glyph-size: 48px;
+  --icon-tile-size: 72px;
+  --icon-tile-radius: 18px;
+  --icon-default-bg: #2d2d2d;
+  --icon-default-fg: #ffffff;
+
+  /* Focus / dial theming */
+  --focus-color: rgba(29, 185, 84, 1);
+  --focus-ring-width: 3px;
   --focus-border-opacity: 1.0;
   --focus-scale: 1.05;
   --focus-shadow: 0 0 20px rgba(29, 185, 84, 0.5);
+
+  /* Status bar theming */
+  --status-bg: #000;
+  --status-fg: #fff;
+  --status-border: #222;
+  --status-nav-dim: 0.35;
 }
 
 /* Interaction Mode Overrides */
@@ -53,8 +68,8 @@ html, body {
 /* Status Bar */
 #status-bar {
   height: var(--status-bar-height);
-  background: #000;
-  border-bottom: 1px solid #222;
+  background: var(--status-bg);
+  border-bottom: 1px solid var(--status-border);
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
@@ -75,18 +90,30 @@ html, body {
 #sys-nav-button {
   background: none;
   border: none;
-  color: #fff;
-  font-size: 28px;
-  font-weight: 300;
-  padding: 0 15px;
+  color: var(--status-fg);
+  padding: 0 12px;
   cursor: pointer;
-  min-width: 60px;
-  text-align: center;
+  min-width: 48px;
+  height: var(--status-bar-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  transition: background 0.15s ease, opacity 0.2s ease;
+}
+
+#sys-nav-button .material-icons {
+  font-size: 22px;
+  line-height: 1;
+}
+
+/* Dim the button when the app is at its root (back is less useful) */
+#sys-nav-button.at-root {
+  opacity: var(--status-nav-dim);
 }
 
 #sys-nav-button:active {
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.15);
 }
 
 #status-time {
@@ -149,12 +176,34 @@ html, body {
 
 .app-card {
   background: #1c1c1e;
-  border: 3px solid transparent;
+  border: var(--focus-ring-width) solid transparent;
   border-radius: 16px;
   padding: 20px;
   text-align: center;
   cursor: pointer;
   transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+/* ─── Icon Tile ──────────────────────────────────────────────── */
+.app-icon {
+  width: var(--icon-tile-size);
+  height: var(--icon-tile-size);
+  border-radius: var(--icon-tile-radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--icon-default-bg);
+  color: var(--icon-default-fg);
+  flex-shrink: 0;
+}
+
+.app-icon .material-icons {
+  font-size: var(--icon-glyph-size);
+  line-height: 1;
 }
 
 /* The Reactive Highlight */
@@ -162,6 +211,11 @@ html, body {
   border-color: rgba(29, 185, 84, var(--focus-border-opacity));
   box-shadow: var(--focus-shadow);
   transform: scale(var(--focus-scale));
+}
+
+/* Pulsing glow on the icon tile when focused via dial */
+body[data-interaction-mode="dial"] .app-card.focused .app-icon {
+  box-shadow: 0 0 14px 2px var(--focus-color);
 }
 
 .app-card:active, .app-card.pressed {
@@ -172,6 +226,11 @@ html, body {
 .app-card-name {
   font-size: 18px;
   font-weight: 600;
+}
+
+/* Prevent Material Icons FOIT — hidden until font loads */
+.material-icons {
+  font-display: swap;
 }
 
 /* App Container */
