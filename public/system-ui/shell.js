@@ -185,15 +185,11 @@ async function initStatusBar() {
   
   // Back button
   const backButton = await createNavButton('arrow_back_ios_new', 'Back', () => {
-    console.log('[Shell] Back button clicked');
-    // TODO: Implement navigation logic
     window.history.back();
   });
   
   // Home button
   const homeButton = await createNavButton('apps', 'Home', () => {
-    console.log('[Shell] Home button clicked');
-    // TODO: Implement home navigation
     window.location.href = '/system-ui';
   });
   

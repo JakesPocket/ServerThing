@@ -1,6 +1,7 @@
 const express = require('express');
 const { WebSocketServer } = require('ws');
 const http = require('http');
+const https = require('https');
 const path = require('path');
 const fs = require('fs');
 const { MessageType } = require('../shared/protocol.js');
@@ -546,7 +547,6 @@ app.get('/api/icons', async (req, res) => {
     const stylePath = styleMap[style] || styleMap['outlined'];
     const iconUrl = `${baseUrl}/${stylePath}/${name}/default/48px.svg`;
     
-    const https = require('https');
     const iconData = await new Promise((resolve, reject) => {
       https.get(iconUrl, (response) => {
         if (response.statusCode === 404) {
