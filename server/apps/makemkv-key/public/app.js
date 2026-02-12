@@ -84,7 +84,7 @@ class MakeMkvApp {
 
   getFocusableElements() {
     return [
-      ...this.elements.keysList.querySelectorAll('.key-item-copy'),
+      ...this.elements.keysList.querySelectorAll('.key-action-btn'),
       this.elements.settingsButton
     ];
   }
