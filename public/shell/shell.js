@@ -1,4 +1,4 @@
-// system-ui/shell.js
+// shell/shell.js
 // Hybrid Icon System for ServerThing System UI
 
 // Icon cache for dynamically loaded icons
@@ -17,11 +17,11 @@ let spriteElement = null;
 async function initIconSystem() {
   try {
     // Load curated icons list
-    const curatedResponse = await fetch('/system-ui/icons/curated.json');
+    const curatedResponse = await fetch('/shell/icons/curated.json');
     curatedIcons = await curatedResponse.json();
     
     // Load and inject sprite.svg
-    const spriteResponse = await fetch('/system-ui/icons/sprite.svg');
+    const spriteResponse = await fetch('/shell/icons/sprite.svg');
     const spriteText = await spriteResponse.text();
     
     // Create a container div for the sprite
@@ -190,7 +190,7 @@ async function initStatusBar() {
   
   // Home button
   const homeButton = await createNavButton('apps', 'Home', () => {
-    window.location.href = '/system-ui';
+    window.location.href = '/shell';
   });
   
   navContainer.appendChild(backButton);
