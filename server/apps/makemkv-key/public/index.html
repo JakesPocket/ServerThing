@@ -2,30 +2,172 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MakeMKV Key Status</title>
+  <meta name="viewport" content="width=800, height=450, user-scalable=no" />
+  <title>MakeMKV Key Manager</title>
   <style>
-    body {
-      margin: 0;
-      height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-family: system-ui, sans-serif;
-      background: #2e7d32; /* default = valid */
-      color: #fff;
+    :root {
+      --accent-color: #ff9800;
+      --success-color: #4caf50;
+      --error-color: #f44336;
+      --bg-dark: #121212;
+      --card-bg: #2a2a2a;
     }
 
-    button {
-      font-size: 1.2rem;
-      padding: 12px 20px;
+    * { 
+      box-sizing: border-box; 
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      width: 800px;
+      height: 450px;
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg-dark);
+      color: #fff;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    .screen {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      padding: 30px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .screen.active {
+      opacity: 1;
+      pointer-events: all;
+    }
+
+    h1 {
+      text-align: center;
+      margin-top: 0;
+      margin-bottom: 25px;
+      color: var(--accent-color);
+      font-size: 32px;
+      letter-spacing: 1px;
+    }
+
+    .keys-list {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      flex: 1;
+    }
+
+    /* Key Item Container & Status Indicators */
+    .key-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--card-bg);
+      padding: 20px 25px;
       border-radius: 12px;
-      border: none;
+      border-left: 10px solid transparent;
+      transition: transform 0.2s ease;
+    }
+
+    .key-item.status-valid {
+      border-left-color: var(--success-color);
+      background: rgba(76, 175, 80, 0.08);
+    }
+
+    .key-item.status-expired {
+      border-left-color: var(--error-color);
+      background: rgba(244, 67, 54, 0.08);
+    }
+
+    .key-info {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .key-item-name {
+      font-size: 22px;
+      font-weight: bold;
+    }
+
+    .key-expiry {
+      font-size: 14px;
+      color: rgba(255, 255, 255, 0.5);
+    }
+
+    /* Primary Action Buttons & Focus States */
+    button, .key-action-btn {
+      font-size: 18px;
+      padding: 12px 24px;
+      border-radius: 8px;
+      border: 2px solid var(--accent-color);
+      background: transparent;
+      color: var(--accent-color);
       cursor: pointer;
+      transition: all 0.2s ease;
+      font-weight: 600;
+      min-width: 140px; /* Accommodates "Refreshing..." text length */
+      text-align: center;
+    }
+
+    /* Unified Focus Glow for all interactive elements */
+    button.focused, .key-action-btn.focused {
+      background: var(--accent-color);
+      color: var(--bg-dark);
+      box-shadow: 0 0 20px rgba(255, 152, 0, 0.4);
+      transform: scale(1.05);
+      outline: 3px solid white;
+    }
+
+    #settings-button {
+      align-self: flex-end;
+      margin-top: auto;
+    }
+
+    #settings-screen p {
+      font-size: 20px;
+      line-height: 1.6;
+      color: rgba(255, 255, 255, 0.8);
+      max-width: 650px;
+      margin: 0 auto 30px auto;
+      text-align: center;
+    }
+
+    #settings-screen strong {
+      color: var(--accent-color);
+    }
+
+    #back-button {
+      align-self: center;
     }
   </style>
 </head>
 <body>
-  <button>Recheck Key</button>
+
+  <div id="main-screen" class="screen active">
+    <h1>MakeMKV Key Manager</h1>
+    <div id="keys-list" class="keys-list">
+      </div>
+    <button id="settings-button">Instructions</button>
+  </div>
+
+  <div id="settings-screen" class="screen">
+    <h1>System Instructions</h1>
+    <p>
+      The Beta key is updated periodically on the MakeMKV forums. 
+      Use <strong>Refresh</strong> to check for the latest internet key, 
+      and <strong>Update</strong> to apply that key to your <strong>Local ARM</strong> configuration.
+    </p>
+    <button id="back-button">Return</button>
+  </div>
+
+  <script src="app.js" type="module"></script>
 </body>
 </html>

@@ -2,52 +2,91 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Viewport height is 450px (shell viewport minus 30px status bar) -->
+  <meta name="viewport" content="width=800, height=450, user-scalable=no">
   <title>Counter App</title>
-  <link rel="stylesheet" href="/ui/style.css">
   <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
     body {
-      background: #fff;
-      color: #333;
-      font-family: sans-serif;
-      padding: 20px;
+      /* App viewport: 800x450 (shell is 800x480 minus 30px status bar) */
+      width: 800px;
+      height: 450px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      user-select: none;
     }
-    .counters {
-      display: grid;
-      gap: 10px;
-      margin-top: 20px;
+    .counter-display {
+      text-align: center;
+      margin-bottom: 40px;
     }
-    .counter-card {
-      background: #f5f5f5;
-      padding: 15px;
-      border-radius: 5px;
-      border-left: 3px solid #0066cc;
-    }
-    .counter-id {
-      font-weight: 500;
-      color: #333;
-      margin-bottom: 5px;
-    }
-    .counter-count {
-      font-size: 2em;
+    .counter-value {
+      font-size: 120px;
       font-weight: bold;
-      color: #0066cc;
+      text-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      transition: transform 0.2s ease;
+    }
+    .counter-value.changed {
+      transform: scale(1.1);
+    }
+    .counter-label {
+      font-size: 24px;
+      color: rgba(255,255,255,0.8);
+      margin-top: 10px;
+    }
+    .controls {
+      background: rgba(0,0,0,0.2);
+      padding: 20px 40px;
+      border-radius: 12px;
+      text-align: center;
+    }
+    .controls h3 {
+      font-size: 18px;
+      margin-bottom: 10px;
+      color: rgba(255,255,255,0.9);
+    }
+    .controls p {
+      font-size: 14px;
+      color: rgba(255,255,255,0.7);
+      line-height: 1.6;
+    }
+    .hint {
+      position: absolute;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 12px;
+      color: rgba(255,255,255,0.5);
+      text-align: center;
     }
   </style>
 </head>
 <body>
-  <h1>Counter App</h1>
-  <p>This UI is now served statically from the app's public directory.</p>
-  <div class="controls-info">
+  <div class="hint">Running in Shell</div>
+  
+  <div class="counter-display">
+    <div class="counter-value" id="counter-value">0</div>
+    <div class="counter-label">Count</div>
+  </div>
+
+  <div class="controls">
+    <h3>Controls</h3>
     <p>
-      <strong>Controls:</strong><br>
-      Preset 1 / Dial Right: Increment (+1)<br>
-      Preset 2 / Dial Left: Decrement (-1)<br>
-      Preset 3: Reset to 0
+      Dial Right: +1<br>
+      Dial Left: -1<br>
+      Dial Click: Reset
     </p>
   </div>
-  <div id="counters" class="counters">
-    <p>Counter data will be loaded here via WebSocket...</p>
-  </div>
+
+  <script src="app.js" type="module"></script>
 </body>
 </html>

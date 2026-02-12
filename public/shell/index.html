@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>ServerThing Shell</title>
+  <link rel="stylesheet" href="/shell/shell.css">
+</head>
+<body>
+  <!-- System UI Shell - Never reloads, permanent runtime -->
+  <div id="shell-container">
+    <!-- Status Bar -->
+    <div id="status-bar">
+      <div class="status-bar-left">
+        <button id="sys-nav-button"></button>
+      </div>
+      <div class="status-bar-center">
+        <span id="status-time">--:--</span>
+      </div>
+      <div class="status-bar-right">
+        <span id="status-connection">●</span>
+      </div>
+    </div>
+
+    <!-- App Container - Full screen apps render here -->
+    <div id="app-viewport">
+      <!-- Home Screen / Launcher -->
+      <div id="home-screen" class="screen active">
+        <h1>ServerThing</h1>
+        <div id="app-grid"></div>
+        <p class="hint">Turn dial to select • Click to open</p>
+      </div>
+
+      <!-- App iframes load here -->
+      <div id="app-container" class="screen"></div>
+    </div>
+
+    <!-- Navigation overlay (shown on back button) -->
+    <div id="nav-overlay" class="hidden">
+      <div class="nav-menu">
+        <div class="nav-item selected" data-action="current-app">
+          <span class="nav-icon">↻</span>
+          <span class="nav-label">Continue</span>
+        </div>
+        <div class="nav-item" data-action="home">
+          <span class="nav-icon">⌂</span>
+          <span class="nav-label">Home</span>
+        </div>
+        <div class="nav-item" data-action="close-app">
+          <span class="nav-icon">✕</span>
+          <span class="nav-label">Close App</span>
+        </div>
+      </div>
+      <p class="hint">Turn dial to select • Click to choose</p>
+    </div>
+
+    <!-- Loading indicator -->
+    <div id="loading" class="hidden">
+      <div class="spinner"></div>
+      <p>Loading...</p>
+    </div>
+  </div>
+
+  <script src="/shell/shell.js" type="module"></script>
+</body>
+</html>
