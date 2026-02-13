@@ -1,14 +1,41 @@
 // System UI Shell - Permanent Runtime for ServerThing
-// Hardware-integrated version for Spotify Car Thing (800x480)
+// Hardware-integrated version — resolution-independent (Car Thing / Tablet / Phone)
 
 import { MessageType, InputType } from '/shared/protocol.js';
 
+// ─── Device Scaling Hook ────────────────────────────────────────────────────
+// Detects the host device class and sets the root font-size so that all rem
+// values scale proportionally.  The Car Thing has an 800×480 screen at low PPI;
+// tablets and phones need a larger base size.
+function applyDeviceScale() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const isCarThing = (w === 800 && h === 480);
+
+  let baseFontSize;
+  if (isCarThing) {
+    baseFontSize = 16;                          // baseline — all rem authored against this
+  } else if (Math.min(w, h) >= 600) {
+    baseFontSize = 20;                          // tablet-class
+  } else {
+    baseFontSize = 18;                          // phone-class
+  }
+
+  document.documentElement.style.fontSize = `${baseFontSize}px`;
+  document.body.setAttribute('data-device', isCarThing ? 'carthing' : 'generic');
+  console.log(`[Shell] Device scale: ${baseFontSize}px  (${w}×${h})`);
+}
+
+// Apply once at boot and on any resize / orientation change
+applyDeviceScale();
+window.addEventListener('resize', applyDeviceScale);
+
 // ─── Icon Manager ───────────────────────────────────────────────────────────
-// Centralized icon resolution for apps. Uses Google Material Icons glyphs.
-// Supports auto-mapping by app name and per-app metadata overrides.
+// Centralized icon resolution for apps.  Uses Google Material Symbols (variable
+// font) so that glyph weight can shift on focus for low-PPI legibility.
 class IconManager {
   constructor() {
-    // Default icon mapping: lowercase keyword → Material Icon name
+    // Keyword → Material Symbols glyph name
     this.iconMap = {
       'counter':    'pin',
       'count':      'pin',
@@ -39,7 +66,7 @@ class IconManager {
       'radio':      'radio',
     };
 
-    // Default palette for auto-assigned backgrounds
+    // Deterministic palette for auto-assigned tile backgrounds
     this.palette = [
       '#2d7d46', '#1565c0', '#c62828', '#6a1b9a',
       '#ef6c00', '#00838f', '#4e342e', '#37474f',
@@ -64,10 +91,10 @@ class IconManager {
     for (const [keyword, icon] of Object.entries(this.iconMap)) {
       if (haystack.includes(keyword)) return icon;
     }
-    return 'apps'; // Fallback
+    return 'apps'; // universal fallback
   }
 
-  /** Deterministic color from the palette based on app id hash. */
+  /** Deterministic color from the palette based on app-id hash. */
   _autoBg(id) {
     let hash = 0;
     for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
@@ -112,8 +139,49 @@ class ShellRuntime {
     this.updateBodyDataset(); 
     this.startClock();
     this.addEventListeners();
+    this.connectWebSocket();
     this.renderAppGrid();
     window.focus();
+  }
+
+  // ─── WebSocket ──────────────────────────────────────────────────────────
+  connectWebSocket() {
+    const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+    const url = `${protocol}://${location.host}/ws/device`;
+    console.log(`[Shell] Connecting to ${url}`);
+
+    this.ws = new WebSocket(url);
+
+    this.ws.addEventListener('open', () => {
+      console.log('[Shell] WebSocket connected');
+      this.updateConnectionStatus(true);
+    });
+
+    this.ws.addEventListener('close', () => {
+      console.log('[Shell] WebSocket disconnected — reconnecting in 3 s');
+      this.updateConnectionStatus(false);
+      setTimeout(() => this.connectWebSocket(), 3000);
+    });
+
+    this.ws.addEventListener('error', () => {
+      this.updateConnectionStatus(false);
+    });
+
+    this.ws.addEventListener('message', (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        this.handleServerMessage(msg);
+      } catch { /* ignore non-JSON frames */ }
+    });
+  }
+
+  updateConnectionStatus(connected) {
+    this.elements.statusConnection.classList.toggle('connected', connected);
+  }
+
+  handleServerMessage(msg) {
+    // Extensible: handle future server-pushed events here
+    console.log('[Shell] Server message:', msg.type);
   }
 
   setInteractionMode(mode) {
@@ -255,21 +323,20 @@ class ShellRuntime {
     this.elements.appGrid.innerHTML = enabledApps.map((app, index) => {
       const icon = this.iconManager.resolve(app);
       return `
-        <div class="app-card ${index === this.focusedAppIndex ? 'focused' : ''}" data-app-id="${app.id}">
-          <div class="app-icon" style="background:${icon.bg}; color:${icon.fg}">
-            <span class="material-icons">${icon.glyph}</span>
+        <div class="app-cell ${index === this.focusedAppIndex ? 'focused' : ''}" data-app-id="${app.id}">
+          <div class="icon-wrapper" style="background:${icon.bg}; color:${icon.fg}">
+            <span class="material-symbols-outlined">${icon.glyph}</span>
           </div>
-          <div class="app-card-name">${app.name}</div>
+          <span class="label-text">${app.name}</span>
         </div>
       `;
     }).join('');
 
     // Re-attach event listeners for touch interaction
-    this.elements.appGrid.querySelectorAll('.app-card').forEach(card => {
-      card.addEventListener('pointerdown', (e) => {
-        // Prevent interference with dial navigation
-        e.stopPropagation(); 
-        const appId = card.getAttribute('data-app-id');
+    this.elements.appGrid.querySelectorAll('.app-cell').forEach(cell => {
+      cell.addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        const appId = cell.getAttribute('data-app-id');
         this.launchApp(appId);
       });
     });

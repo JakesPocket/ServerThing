@@ -245,5 +245,35 @@
         "timestamp": 1770781315658
       }
     ]
+  },
+  {
+    "id": "device-1770944353523",
+    "connected": false,
+    "lastSeen": 1770944353525,
+    "inputs": []
+  },
+  {
+    "id": "device-1770944385014",
+    "connected": false,
+    "lastSeen": 1770956331868,
+    "inputs": []
+  },
+  {
+    "id": "device-1770956331908",
+    "connected": false,
+    "lastSeen": 1770956727156,
+    "inputs": []
+  },
+  {
+    "id": "device-1770956727226",
+    "connected": false,
+    "lastSeen": 1770957762911,
+    "inputs": []
+  },
+  {
+    "id": "device-1770957762978",
+    "connected": false,
+    "lastSeen": 1770957762980,
+    "inputs": []
   }
 ]

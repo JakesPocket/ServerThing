@@ -1,33 +1,49 @@
-/* System UI Shell - Optimized for 800x480 Car Thing Display */
+/* System UI Shell — Resolution-Independent Layout
+   Targets: Spotify Car Thing (800×480), Tablets, Smartphones.
+   Base unit: 1 rem. Root font-size is set by the scaling hook in shell.js. */
 
-:root {
-  --shell-width: 800px;
-  --shell-height: 480px;
-  --status-bar-height: 40px;
-  --accent: #007aff;
-
-  /* Icon theming — override for dark mode or per-app accenting */
-  --icon-glyph-size: 48px;
-  --icon-tile-size: 72px;
-  --icon-tile-radius: 18px;
-  --icon-default-bg: #2d2d2d;
-  --icon-default-fg: #ffffff;
-
-  /* Focus / dial theming */
-  --focus-color: rgba(29, 185, 84, 1);
-  --focus-ring-width: 3px;
-  --focus-border-opacity: 1.0;
-  --focus-scale: 1.05;
-  --focus-shadow: 0 0 20px rgba(29, 185, 84, 0.5);
-
-  /* Status bar theming */
-  --status-bg: #000;
-  --status-fg: #fff;
-  --status-border: #222;
-  --status-nav-dim: 0.35;
+/* ─── Scaling Baseline ─────────────────────────────────────────────────────── */
+html {
+  /* Default: Car Thing (800×480, low-PPI).  Overridden by JS for other devices. */
+  font-size: 16px;
 }
 
-/* Interaction Mode Overrides */
+:root {
+  /* Layout */
+  --status-bar-height: 2.5rem;       /* 40px @ 16px base */
+  --grid-columns: 4;
+  --grid-rows: 3;
+  --grid-gap: clamp(0.5rem, 2vw, 1.25rem);
+  --grid-pad: clamp(0.75rem, 3vw, 1.5rem);
+
+  /* Accent / brand */
+  --accent: #007aff;
+  --focus-color: #1db954;
+
+  /* Icon tile */
+  --icon-tile-size:   clamp(3rem, 10vw, 5rem);
+  --icon-tile-radius: 1.125rem;
+  --icon-glyph-size:  clamp(1.75rem, 6vw, 3rem);
+  --icon-default-bg:  #2d2d2d;
+  --icon-default-fg:  #ffffff;
+
+  /* Focus / dial */
+  --focus-ring-width:   0.1875rem;
+  --focus-border-opacity: 1.0;
+  --focus-scale:        1.1;
+  --focus-shadow:       0 0 1.25rem rgba(29, 185, 84, 0.5);
+
+  /* Status bar */
+  --status-bg:      #000;
+  --status-fg:      #fff;
+  --status-border:  #222;
+  --status-nav-dim: 0.35;
+
+  /* Label */
+  --label-size: clamp(0.625rem, 2vw, 0.875rem);
+}
+
+/* ─── Interaction Mode Overrides ───────────────────────────────────────────── */
 body[data-interaction-mode="touch"] {
   --focus-border-opacity: 0.15;
   --focus-scale: 1.0;
@@ -36,10 +52,11 @@ body[data-interaction-mode="touch"] {
 
 body[data-interaction-mode="dial"] {
   --focus-border-opacity: 1.0;
-  --focus-scale: 1.05;
-  --focus-shadow: 0 0 20px rgba(29, 185, 84, 0.5);
+  --focus-scale: 1.1;
+  --focus-shadow: 0 0 1.25rem rgba(29, 185, 84, 0.5);
 }
 
+/* ─── Reset ────────────────────────────────────────────────────────────────── */
 * {
   margin: 0;
   padding: 0;
@@ -47,8 +64,8 @@ body[data-interaction-mode="dial"] {
 }
 
 html, body {
-  width: var(--shell-width);
-  height: var(--shell-height);
+  width: 100vw;
+  height: 100vh;
   overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background: #000;
@@ -56,6 +73,8 @@ html, body {
   user-select: none;
   -webkit-user-select: none;
   -webkit-tap-highlight-color: transparent;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 #shell-container {
@@ -63,51 +82,49 @@ html, body {
   height: 100%;
   display: flex;
   flex-direction: column;
+  /* Respect notches / safe-areas on modern phones */
+  padding-top: env(safe-area-inset-top, 0);
+  padding-left: env(safe-area-inset-left, 0);
+  padding-right: env(safe-area-inset-right, 0);
 }
 
-/* Status Bar */
+/* ─── Status Bar ───────────────────────────────────────────────────────────── */
 #status-bar {
   height: var(--status-bar-height);
   background: var(--status-bg);
-  border-bottom: 1px solid var(--status-border);
+  border-bottom: 0.0625rem solid var(--status-border);
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  padding: 0 10px;
-  font-size: 16px;
+  padding: 0 0.625rem;
+  font-size: 1rem;
   flex-shrink: 0;
   z-index: 1000;
 }
 
-.status-bar-center {
-  text-align: center;
-}
-
-.status-bar-right {
-  text-align: right;
-}
+.status-bar-center { text-align: center; }
+.status-bar-right  { text-align: right; }
 
 #sys-nav-button {
   background: none;
   border: none;
   color: var(--status-fg);
-  padding: 0 12px;
+  padding: 0 0.75rem;
   cursor: pointer;
-  min-width: 48px;
+  min-width: 3rem;
   height: var(--status-bar-height);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
+  border-radius: 0.5rem;
   transition: background 0.15s ease, opacity 0.2s ease;
 }
 
-#sys-nav-button .material-icons {
-  font-size: 22px;
+#sys-nav-button .material-symbols-outlined {
+  font-size: 1.375rem;
   line-height: 1;
 }
 
-/* Dim the button when the app is at its root (back is less useful) */
 #sys-nav-button.at-root {
   opacity: var(--status-nav-dim);
 }
@@ -119,20 +136,19 @@ html, body {
 #status-time {
   font-variant-numeric: tabular-nums;
   font-weight: 500;
+  font-size: 1rem;
 }
 
 #status-connection {
   color: #555;
-  font-size: 12px;
-  min-width: 60px;
+  font-size: 0.75rem;
+  min-width: 3.75rem;
   text-align: right;
 }
 
-#status-connection.connected {
-  color: #0f0;
-}
+#status-connection.connected { color: #0f0; }
 
-/* App Viewport */
+/* ─── App Viewport ─────────────────────────────────────────────────────────── */
 #app-viewport {
   flex: 1;
   position: relative;
@@ -141,10 +157,8 @@ html, body {
 
 .screen {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.3s ease;
@@ -155,85 +169,119 @@ html, body {
   pointer-events: all;
 }
 
-/* Home Screen / Launcher */
+/* ─── Home Screen / Launcher ───────────────────────────────────────────────── */
 #home-screen {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   background: #000;
-  padding: 20px;
+  padding: var(--grid-pad);
+  /* fill available height below status bar */
+  height: calc(100vh - var(--status-bar-height) - env(safe-area-inset-top, 0px));
 }
 
+/* ─── 4 × 3 Icon Grid ─────────────────────────────────────────────────────── */
 #app-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 25px;
+  grid-template-columns: repeat(var(--grid-columns), 1fr);
+  grid-template-rows: repeat(var(--grid-rows), 1fr);
+  gap: var(--grid-gap);
   width: 100%;
-  max-width: 720px;
-  padding: 0 20px;
+  max-width: 50rem;
+  /* Let the grid consume remaining vertical space */
+  flex: 1;
+  align-content: center;
 }
 
-.app-card {
-  background: #1c1c1e;
-  border: var(--focus-ring-width) solid transparent;
-  border-radius: 16px;
-  padding: 20px;
-  text-align: center;
-  cursor: pointer;
-  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+/* ─── Grid Cell ────────────────────────────────────────────────────────────── */
+.app-cell {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  justify-content: center;
+  gap: 0.375rem;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  /* Keep dial outline on the cell for accessibility */
+  outline: none;
 }
 
-/* ─── Icon Tile ──────────────────────────────────────────────── */
-.app-icon {
+/* ─── Icon Wrapper (the "squircle") ────────────────────────────────────────── */
+.icon-wrapper {
   width: var(--icon-tile-size);
-  height: var(--icon-tile-size);
+  aspect-ratio: 1 / 1;
   border-radius: var(--icon-tile-radius);
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--icon-default-bg);
   color: var(--icon-default-fg);
-  flex-shrink: 0;
+  border: var(--focus-ring-width) solid transparent;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease,
+              font-variation-settings 0.2s ease;
+  /* Variable font — default weight */
+  font-variation-settings: 'wght' 400;
 }
 
-.app-icon .material-icons {
+.icon-wrapper .material-symbols-outlined {
   font-size: var(--icon-glyph-size);
   line-height: 1;
+  /* Inherit variable weight from parent */
+  font-variation-settings: inherit;
 }
 
-/* The Reactive Highlight */
-.app-card.focused {
+/* ─── Label ────────────────────────────────────────────────────────────────── */
+.label-text {
+  font-size: var(--label-size);
+  font-weight: 400;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.7);
+  max-width: calc(var(--icon-tile-size) + 1rem);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  transition: color 0.2s ease, font-weight 0.2s ease;
+}
+
+/* ─── Focus States ─────────────────────────────────────────────────────────── */
+.app-cell.focused .icon-wrapper {
   border-color: rgba(29, 185, 84, var(--focus-border-opacity));
   box-shadow: var(--focus-shadow);
   transform: scale(var(--focus-scale));
+  /* Heavier weight on focus for low-PPI legibility */
+  font-variation-settings: 'wght' 700;
 }
 
-/* Pulsing glow on the icon tile when focused via dial */
-body[data-interaction-mode="dial"] .app-card.focused .app-icon {
-  box-shadow: 0 0 14px 2px var(--focus-color);
-}
-
-.app-card:active, .app-card.pressed {
-  background: #3a3a3c;
-  transform: scale(0.97);
-}
-
-.app-card-name {
-  font-size: 18px;
+.app-cell.focused .label-text {
+  color: #fff;
   font-weight: 600;
 }
 
-/* Prevent Material Icons FOIT — hidden until font loads */
-.material-icons {
+/* Extra dial-specific glow */
+body[data-interaction-mode="dial"] .app-cell.focused .icon-wrapper {
+  box-shadow: 0 0 0.875rem 0.125rem var(--focus-color);
+}
+
+/* Press / active */
+.app-cell:active .icon-wrapper,
+.app-cell.pressed .icon-wrapper {
+  transform: scale(0.92);
+}
+
+/* ─── Material Symbols — Prevent FOIT ──────────────────────────────────────── */
+.material-symbols-outlined {
   font-display: swap;
 }
 
-/* App Container */
+/* ─── Hint text ────────────────────────────────────────────────────────────── */
+.hint {
+  font-size: clamp(0.625rem, 1.5vw, 0.8125rem);
+  color: rgba(255, 255, 255, 0.35);
+  margin-top: 0.5rem;
+}
+
+/* ─── App Container (iframes) ──────────────────────────────────────────────── */
 #app-container iframe {
   width: 100%;
   height: 100%;
@@ -241,6 +289,7 @@ body[data-interaction-mode="dial"] .app-card.focused .app-icon {
   display: block;
 }
 
+/* ─── Loading ──────────────────────────────────────────────────────────────── */
 #loading {
   position: fixed;
   top: 0; left: 0;
@@ -252,8 +301,8 @@ body[data-interaction-mode="dial"] .app-card.focused .app-icon {
 }
 
 .spinner {
-  width: 40px; height: 40px;
-  border: 4px solid rgba(255, 255, 255, 0.1);
+  width: 2.5rem; height: 2.5rem;
+  border: 0.25rem solid rgba(255, 255, 255, 0.1);
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
