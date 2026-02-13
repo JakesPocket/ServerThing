@@ -273,7 +273,43 @@
   {
     "id": "device-1770957762978",
     "connected": false,
-    "lastSeen": 1770957762980,
+    "lastSeen": 1770958116567,
+    "inputs": []
+  },
+  {
+    "id": "device-1770958116628",
+    "connected": false,
+    "lastSeen": 1770958116875,
+    "inputs": []
+  },
+  {
+    "id": "device-1770958116915",
+    "connected": false,
+    "lastSeen": 1770958315223,
+    "inputs": []
+  },
+  {
+    "id": "device-1770958315298",
+    "connected": false,
+    "lastSeen": 1770958315299,
+    "inputs": []
+  },
+  {
+    "id": "device-1770959331357",
+    "connected": false,
+    "lastSeen": 1770959332305,
+    "inputs": []
+  },
+  {
+    "id": "device-1770959332381",
+    "connected": false,
+    "lastSeen": 1770959852061,
+    "inputs": []
+  },
+  {
+    "id": "device-1770959852146",
+    "connected": false,
+    "lastSeen": 1770959852147,
     "inputs": []
   }
 ]

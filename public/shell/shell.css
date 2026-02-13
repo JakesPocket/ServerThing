@@ -18,7 +18,8 @@ html {
 
   /* Accent / brand */
   --accent: #007aff;
-  --focus-color: #1db954;
+  --focus-color: #ffffff;
+  --muted-opacity: 0.5;
 
   /* Icon tile */
   --icon-tile-size:   clamp(3rem, 10vw, 5rem);
@@ -27,11 +28,17 @@ html {
   --icon-default-bg:  #2d2d2d;
   --icon-default-fg:  #ffffff;
 
+  /* Material Symbols — variable-font axes */
+  --sym-weight:       400;
+  --sym-grade:        0;
+  --sym-opsz:         24;
+  --sym-weight-focus: 700;
+  --sym-grade-focus:  200;
+
   /* Focus / dial */
   --focus-ring-width:   0.1875rem;
   --focus-border-opacity: 1.0;
-  --focus-scale:        1.1;
-  --focus-shadow:       0 0 1.25rem rgba(29, 185, 84, 0.5);
+  --focus-shadow:       0 0 0.75rem rgba(255, 255, 255, 0.25);
 
   /* Status bar */
   --status-bg:      #000;
@@ -45,15 +52,13 @@ html {
 
 /* ─── Interaction Mode Overrides ───────────────────────────────────────────── */
 body[data-interaction-mode="touch"] {
-  --focus-border-opacity: 0.15;
-  --focus-scale: 1.0;
+  --focus-border-opacity: var(--muted-opacity);
   --focus-shadow: none;
 }
 
 body[data-interaction-mode="dial"] {
   --focus-border-opacity: 1.0;
-  --focus-scale: 1.1;
-  --focus-shadow: 0 0 1.25rem rgba(29, 185, 84, 0.5);
+  --focus-shadow: 0 0 0.75rem rgba(255, 255, 255, 0.25);
 }
 
 /* ─── Reset ────────────────────────────────────────────────────────────────── */
@@ -192,6 +197,7 @@ html, body {
   /* Let the grid consume remaining vertical space */
   flex: 1;
   align-content: center;
+  place-items: center;
 }
 
 /* ─── Grid Cell ────────────────────────────────────────────────────────────── */
@@ -218,16 +224,19 @@ html, body {
   background: var(--icon-default-bg);
   color: var(--icon-default-fg);
   border: var(--focus-ring-width) solid transparent;
-  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease,
+  transition: border-color 0.2s ease, box-shadow 0.2s ease,
               font-variation-settings 0.2s ease;
-  /* Variable font — default weight */
-  font-variation-settings: 'wght' 400;
+  /* Variable font — default axes */
+  font-variation-settings:
+    'wght' var(--sym-weight),
+    'GRAD' var(--sym-grade),
+    'opsz' var(--sym-opsz);
 }
 
 .icon-wrapper .material-symbols-outlined {
   font-size: var(--icon-glyph-size);
   line-height: 1;
-  /* Inherit variable weight from parent */
+  /* Inherit variable axes from parent */
   font-variation-settings: inherit;
 }
 
@@ -237,36 +246,65 @@ html, body {
   font-weight: 400;
   text-align: center;
   color: rgba(255, 255, 255, 0.7);
-  max-width: calc(var(--icon-tile-size) + 1rem);
+  /* 18 characters + breathing room */
+  max-width: 18ch;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  transition: color 0.2s ease, font-weight 0.2s ease;
+  transition: color 0.2s ease;
 }
 
 /* ─── Focus States ─────────────────────────────────────────────────────────── */
 .app-cell.focused .icon-wrapper {
-  border-color: rgba(29, 185, 84, var(--focus-border-opacity));
+  border-color: rgba(255, 255, 255, var(--focus-border-opacity));
   box-shadow: var(--focus-shadow);
-  transform: scale(var(--focus-scale));
-  /* Heavier weight on focus for low-PPI legibility */
-  font-variation-settings: 'wght' 700;
+  /* No scale — geometric stability. Weight shift only. */
+  font-variation-settings:
+    'wght' var(--sym-weight-focus),
+    'GRAD' var(--sym-grade-focus),
+    'opsz' var(--sym-opsz);
 }
 
 .app-cell.focused .label-text {
   color: #fff;
-  font-weight: 600;
+  /* No font-weight change — keeps typography static, prevents layout reflow */
+  overflow: visible;
+  max-width: none;
 }
 
 /* Extra dial-specific glow */
 body[data-interaction-mode="dial"] .app-cell.focused .icon-wrapper {
-  box-shadow: 0 0 0.875rem 0.125rem var(--focus-color);
+  box-shadow: 0 0 0.75rem 0.125rem var(--focus-color);
 }
 
-/* Press / active */
+/* Muted state — touch tapped but transitioning */
+.app-cell.muted .icon-wrapper {
+  border-color: rgba(255, 255, 255, var(--muted-opacity));
+  box-shadow: none;
+}
+
+.app-cell.muted .label-text {
+  color: rgba(255, 255, 255, var(--muted-opacity));
+}
+
+/* ─── Status Bar Focus States ──────────────────────────────────────────────── */
+#sys-nav-button.focused {
+  background: rgba(255, 255, 255, 0.12);
+  outline: var(--focus-ring-width) solid rgba(255, 255, 255, var(--focus-border-opacity));
+  outline-offset: -0.0625rem;
+  opacity: 1;
+}
+
+#sys-nav-button.muted {
+  outline: var(--focus-ring-width) solid rgba(255, 255, 255, var(--muted-opacity));
+  outline-offset: -0.0625rem;
+  opacity: 1;
+}
+
+/* Press / active — no scale, just dim */
 .app-cell:active .icon-wrapper,
 .app-cell.pressed .icon-wrapper {
-  transform: scale(0.92);
+  opacity: 0.7;
 }
 
 /* ─── Material Symbols — Prevent FOIT ──────────────────────────────────────── */
