@@ -5,7 +5,7 @@
 /* ─── Scaling Baseline ─────────────────────────────────────────────────────── */
 html {
   /* Default: Car Thing (800×480, low-PPI).  Overridden by JS for other devices. */
-  font-size: 16px;
+  font-size: 18px;
 }
 
 :root {
@@ -38,7 +38,7 @@ html {
   /* Focus / dial */
   --focus-ring-width:   0.1875rem;
   --focus-border-opacity: 1.0;
-  --focus-shadow:       0 0 0.75rem rgba(255, 255, 255, 0.25);
+  --focus-shadow:       none;
 
   /* Status bar */
   --status-bg:      #000;
@@ -48,6 +48,11 @@ html {
 
   /* Label */
   --label-size: clamp(0.625rem, 2vw, 0.875rem);
+
+  /* ─── UI Bridge Tokens (injected into iframes) ──────────────────────── */
+  --st-highlight-bg:     #ffffff;
+  --st-muted-opacity:    0.5;
+  --st-transition-speed: 0.1s;
 }
 
 /* ─── Interaction Mode Overrides ───────────────────────────────────────────── */
@@ -58,7 +63,7 @@ body[data-interaction-mode="touch"] {
 
 body[data-interaction-mode="dial"] {
   --focus-border-opacity: 1.0;
-  --focus-shadow: 0 0 0.75rem rgba(255, 255, 255, 0.25);
+  --focus-shadow: none;
 }
 
 /* ─── Reset ────────────────────────────────────────────────────────────────── */
@@ -108,20 +113,28 @@ html, body {
 }
 
 .status-bar-center { text-align: center; }
-.status-bar-right  { text-align: right; }
+.status-bar-right  {
+  text-align: right;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 100%;
+}
 
 #sys-nav-button {
   background: none;
   border: none;
   color: var(--status-fg);
-  padding: 0 0.75rem;
+  padding: 0 0.5rem;
   cursor: pointer;
-  min-width: 3rem;
-  height: var(--status-bar-height);
+  /* Fit inside status bar with room for focus outline */
+  min-width: 2.5rem;
+  height: calc(var(--status-bar-height) - 0.625rem);
+  max-height: calc(var(--status-bar-height) - 0.625rem);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 0.5rem;
+  border-radius: 0.375rem;
   transition: background 0.15s ease, opacity 0.2s ease;
 }
 
@@ -131,7 +144,7 @@ html, body {
 }
 
 #sys-nav-button.at-root {
-  opacity: var(--status-nav-dim);
+  opacity: 1;
 }
 
 #sys-nav-button:active {
@@ -149,6 +162,11 @@ html, body {
   font-size: 0.75rem;
   min-width: 3.75rem;
   text-align: right;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 100%;
+  line-height: 1;
 }
 
 #status-connection.connected { color: #0f0; }
@@ -167,6 +185,8 @@ html, body {
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.3s ease;
+  /* Compositor-friendly: promote to own layer */
+  will-change: opacity;
 }
 
 .screen.active {
@@ -224,8 +244,10 @@ html, body {
   background: var(--icon-default-bg);
   color: var(--icon-default-fg);
   border: var(--focus-ring-width) solid transparent;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease,
-              font-variation-settings 0.2s ease;
+  transition: border-color 0.15s ease,
+              font-variation-settings 0.15s ease;
+  /* Compositor layer promotion for smooth focus transitions */
+  will-change: border-color, opacity;
   /* Variable font — default axes */
   font-variation-settings:
     'wght' var(--sym-weight),
@@ -272,10 +294,7 @@ html, body {
   max-width: none;
 }
 
-/* Extra dial-specific glow */
-body[data-interaction-mode="dial"] .app-cell.focused .icon-wrapper {
-  box-shadow: 0 0 0.75rem 0.125rem var(--focus-color);
-}
+/* Dial-specific: no extra glow */
 
 /* Muted state — touch tapped but transitioning */
 .app-cell.muted .icon-wrapper {
@@ -325,6 +344,26 @@ body[data-interaction-mode="dial"] .app-cell.focused .icon-wrapper {
   height: 100%;
   border: none;
   display: block;
+}
+
+/* ─── Standardised Selectable (Shell-side reference) ──────────────────────── */
+.st-selectable {
+  transform: none !important;
+  font-weight: inherit !important;
+  transition: opacity var(--st-transition-speed) ease,
+              outline var(--st-transition-speed) ease;
+}
+
+.st-selectable.st-focused {
+  outline: var(--focus-ring-width) solid var(--st-highlight-bg);
+  outline-offset: 0.125rem;
+  opacity: 1;
+}
+
+.st-selectable.st-muted {
+  outline: var(--focus-ring-width) solid rgba(255, 255, 255, var(--st-muted-opacity));
+  outline-offset: 0.125rem;
+  opacity: var(--st-muted-opacity);
 }
 
 /* ─── Loading ──────────────────────────────────────────────────────────────── */

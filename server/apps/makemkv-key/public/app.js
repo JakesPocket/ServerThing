@@ -43,6 +43,12 @@ class MakeMkvApp {
       this.handleHardwareInput(message.data);
     } else if (message.type === 'CMD_BACK') {
       this.handleBackCommand();
+    } else if (message.type === 'DIM_APP_FOCUS') {
+      // Shell moved focus away — dim our highlights
+      this.getFocusableElements().forEach(el => el.classList.remove('focused'));
+    } else if (message.type === 'ZONE_FOCUS' && message.active) {
+      // Shell returned focus to us — re-apply highlight
+      this.updateFocus();
     }
   }
 
@@ -67,7 +73,13 @@ class MakeMkvApp {
       if (value === 'RIGHT') {
         this.focusedIndex = (this.focusedIndex + 1) % focusable.length;
       } else if (value === 'LEFT') {
-        this.focusedIndex = (this.focusedIndex - 1 + focusable.length) % focusable.length;
+        if (this.focusedIndex > 0) {
+          this.focusedIndex--;
+        } else {
+          // At first item — escape to Shell status bar
+          window.parent.postMessage({ type: 'APP_AT_TOP' }, location.origin);
+          return;
+        }
       }
       this.updateFocus();
     } else if (type === 'BUTTON' && value === 'DIAL_CLICK_DOWN') {
@@ -196,7 +208,7 @@ class MakeMkvApp {
     window.parent.postMessage({
       type: 'APP_NAV_STATE',
       atRoot: isAtRoot
-    }, '*');
+    }, location.origin);
   }
 }
 

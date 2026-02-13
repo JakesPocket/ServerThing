@@ -14,7 +14,7 @@ function applyDeviceScale() {
 
   let baseFontSize;
   if (isCarThing) {
-    baseFontSize = 16;                          // baseline — all rem authored against this
+    baseFontSize = 18;                          // baseline — all rem authored against this
   } else if (Math.min(w, h) >= 600) {
     baseFontSize = 20;                          // tablet-class
   } else {
@@ -202,7 +202,8 @@ class ShellRuntime {
     this.configManager = new ConfigManager();
     this.apps = [
       { id: 'counter', name: 'Counter', enabled: true },
-      { id: 'makemkv-key', name: 'MakeMKV Manager', enabled: true }
+      { id: 'makemkv-key', name: 'MakeMKV Manager', enabled: true },
+      { id: 'stress-test', name: 'SuperLongAppNameTe', enabled: true },
     ];
     this.currentApp = { id: null, iframe: null, atRoot: true };
     this.interactionMode = 'dial';
@@ -212,6 +213,10 @@ class ShellRuntime {
     this.focusZone = 'grid';
     this.statusBarItems = [];  // populated in init()
     this.statusBarFocusIndex = 0;
+
+    // Dial throttle — 25 ms for scroll, leading-edge for clicks
+    this._dialThrottleMs = 25;
+    this._lastDialTime = 0;
     
     // Timer for Long Press
     this.backButtonTimer = null;
@@ -329,8 +334,33 @@ class ShellRuntime {
     window.addEventListener('message', (event) => this.handleIframeMessage(event));
   }
 
+  // ── Focus Recovery Safety Valve ──────────────────────────────────────────
+  // If a dial event arrives but nothing is visually focused, reset to a
+  // known-good state so the user is never "stuck".
+  recoverFocus() {
+    const hasFocusedCell = this.elements.appGrid.querySelector('.app-cell.focused');
+    const hasFocusedNav  = this.elements.sysNavButton.classList.contains('focused');
+
+    if (hasFocusedCell || hasFocusedNav) return false; // focus is fine
+    if (this.focusZone === 'app' && this.currentApp.iframe) return false; // app owns focus
+
+    console.warn('[Shell] Focus lost — recovering to status bar');
+    this.focusZone = 'statusbar';
+    this.applyZoneFocus();
+    return true;
+  }
+
   handleHardwareInput(input) {
     this.setInteractionMode('dial');
+
+    // ── Dial throttle (25 ms) — prevents flood on fast rotary spin ─────
+    if (input.type === InputType.DIAL) {
+      const now = performance.now();
+      if (now - this._lastDialTime < this._dialThrottleMs) return;
+      this._lastDialTime = now;
+      // Safety valve: if focus was lost, recover before processing
+      this.recoverFocus();
+    }
 
     // Preset Shortcuts
     if (input.type === InputType.BUTTON) {
@@ -375,7 +405,12 @@ class ShellRuntime {
 
       // Horizontal movement: within-zone navigation
       if (this.focusZone === 'statusbar') {
-        // Only one item in status bar for now; could expand later
+        // Dial RIGHT from status bar: return focus to app or grid
+        if (dir === 'right') {
+          this.focusZone = this.currentApp.id ? 'app' : 'grid';
+          this.applyZoneFocus();
+        }
+        // LEFT in statusbar: no-op (single item for now)
         return;
       }
 
@@ -429,7 +464,13 @@ class ShellRuntime {
       // Re-render sets .focused on the correct cell
       this.renderAppGrid();
     }
-    // 'app' zone: focus lives inside the iframe — nothing to highlight in shell
+    // 'app' zone: tell the iframe whether it's the primary focus
+    if (this.focusZone === 'app') {
+      this.postMessageToApp({ type: 'ZONE_FOCUS', active: true });
+    } else if (this.currentApp.id) {
+      // Another zone owns focus — dim the app's internal highlights
+      this.postMessageToApp({ type: 'DIM_APP_FOCUS' });
+    }
   }
 
   handleBackButtonDown() {
@@ -465,10 +506,17 @@ class ShellRuntime {
   }
 
   launchApp(appId) {
+    // ── Cleanup previous app (memory-leak prevention) ──────────────────
+    this._teardownCurrentApp();
+
     this.showLoading(true);
     const iframe = document.createElement('iframe');
     iframe.src = `/apps/${appId}/index.html`;
-    iframe.onload = () => this.showLoading(false);
+    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+    iframe.onload = () => {
+      this.showLoading(false);
+      this.injectBridgeTheme(iframe);
+    };
     
     this.elements.appContainer.innerHTML = '';
     this.elements.appContainer.appendChild(iframe);
@@ -484,8 +532,58 @@ class ShellRuntime {
     this.updateNavIcon(true);
   }
 
+  // ── UI Bridge: Theme Injection ──────────────────────────────────────────
+  /** Inject CSS custom-properties and .st-selectable rules into the iframe's <head>. */
+  injectBridgeTheme(iframe) {
+    try {
+      const doc = iframe.contentDocument;
+      if (!doc) return;
+      const style = doc.createElement('style');
+      style.setAttribute('data-shell-bridge', 'true');
+      style.textContent = `
+        /* Shell UI Bridge — injected by ShellRuntime */
+        :root {
+          --st-highlight-bg:     #ffffff;
+          --st-muted-opacity:    0.5;
+          --st-transition-speed: 0.1s;
+        }
+        .st-selectable {
+          transform: none !important;
+          font-weight: inherit !important;
+          transition: opacity var(--st-transition-speed) ease,
+                      outline var(--st-transition-speed) ease;
+        }
+        .st-selectable.st-focused {
+          outline: 0.1875rem solid var(--st-highlight-bg);
+          outline-offset: 0.125rem;
+          opacity: 1;
+        }
+        .st-selectable.st-muted {
+          outline: 0.1875rem solid rgba(255,255,255, var(--st-muted-opacity));
+          outline-offset: 0.125rem;
+          opacity: var(--st-muted-opacity);
+        }
+      `;
+      doc.head.appendChild(style);
+      // Notify the app that the bridge theme is ready
+      this.postMessageToApp({ type: 'THEME_READY' });
+      console.log(`[Shell] Bridge theme injected into ${iframe.src}`);
+    } catch (e) {
+      // Cross-origin iframes will throw — fall back to postMessage
+      console.warn('[Shell] Could not inject theme (cross-origin?), sending via postMessage');
+      this.postMessageToApp({
+        type: 'THEME_UPDATE',
+        tokens: {
+          '--st-highlight-bg':     '#ffffff',
+          '--st-muted-opacity':    '0.5',
+          '--st-transition-speed': '0.1s',
+        }
+      });
+    }
+  }
+
   returnToHomeGrid() {
-    this.elements.appContainer.innerHTML = '';
+    this._teardownCurrentApp();
     this.currentApp = { id: null, iframe: null, atRoot: true };
     this.elements.appContainer.classList.remove('active');
     this.elements.homeScreen.classList.add('active');
@@ -495,6 +593,25 @@ class ShellRuntime {
     this.elements.sysNavButton.classList.remove('at-root', 'focused', 'muted');
     this.focusZone = 'grid';
     this.renderAppGrid();
+  }
+
+  // ── Iframe Teardown (memory-leak prevention) ────────────────────────────
+  _teardownCurrentApp() {
+    if (this.currentApp.iframe) {
+      try {
+        // Stop any running timers/intervals inside the iframe
+        const win = this.currentApp.iframe.contentWindow;
+        if (win) {
+          // Clear the iframe document before removal
+          const doc = this.currentApp.iframe.contentDocument;
+          if (doc) doc.open(), doc.write(''), doc.close();
+        }
+      } catch { /* cross-origin — iframe will be GC'd on removal */ }
+      this.currentApp.iframe.onload = null;
+      this.currentApp.iframe.onerror = null;
+      this.currentApp.iframe.src = 'about:blank';
+    }
+    this.elements.appContainer.innerHTML = '';
   }
 
   renderAppGrid() {
@@ -546,19 +663,36 @@ class ShellRuntime {
 
   postMessageToApp(msg) {
     if (this.currentApp.iframe) {
-      this.currentApp.iframe.contentWindow.postMessage(msg, '*');
+      this.currentApp.iframe.contentWindow.postMessage(msg, location.origin);
     }
   }
 
   handleIframeMessage(event) {
-    const { type, atRoot } = event.data || {};
+    // ── Origin & schema validation ────────────────────────────────────────
+    if (event.origin !== location.origin) return;
+    const data = event.data;
+    if (!data || typeof data !== 'object' || typeof data.type !== 'string') return;
+    const ALLOWED_TYPES = ['APP_NAV_STATE','APP_AT_TOP','UI_ACTION_START'];
+    if (!ALLOWED_TYPES.includes(data.type)) return;
+
+    const { type, atRoot, elementId } = data;
     if (type === 'APP_NAV_STATE') {
       this.currentApp.atRoot = atRoot;
       this.updateNavIcon(atRoot);
     }
-    // Bridge: app signals it's at its top — shell can catch the next "up" dial
+    // Bridge: app signals it's at its top — immediately move focus to status bar
     if (type === 'APP_AT_TOP') {
       this.currentApp.atRoot = true;
+      if (this.focusZone === 'app') {
+        this.focusZone = 'statusbar';
+        this.applyZoneFocus();
+      }
+    }
+    // Bridge: app reports a tap/click — Shell renders muted highlight
+    if (type === 'UI_ACTION_START') {
+      console.log('[Shell] App action started', elementId || '');
+      // Acknowledge — the app can show its own muted state immediately
+      this.postMessageToApp({ type: 'UI_ACTION_ACK', elementId });
     }
   }
 
@@ -587,3 +721,25 @@ class ShellRuntime {
 }
 
 document.addEventListener('DOMContentLoaded', () => { window.shell = new ShellRuntime(); });
+
+// ─── Heap Monitor (DevTools diagnostic) ─────────────────────────────────────
+// Paste into console or enable with: shell.startHeapMonitor()
+// Logs a warning if JS heap grows by >10 MB in 5 minutes.
+ShellRuntime.prototype.startHeapMonitor = function (intervalSec = 30, thresholdMB = 10, windowMin = 5) {
+  if (!performance.memory) { console.warn('[HeapMon] performance.memory not available (use Chrome with --enable-precise-memory-info)'); return; }
+  const samples = [];
+  setInterval(() => {
+    const mb = performance.memory.usedJSHeapSize / 1048576;
+    const now = Date.now();
+    samples.push({ t: now, mb });
+    // Prune samples older than the window
+    const cutoff = now - windowMin * 60000;
+    while (samples.length && samples[0].t < cutoff) samples.shift();
+    if (samples.length >= 2) {
+      const delta = mb - samples[0].mb;
+      if (delta > thresholdMB) console.warn(`[HeapMon] ⚠ Heap grew ${delta.toFixed(1)} MB in ${windowMin} min (${mb.toFixed(1)} MB used)`);
+    }
+    console.log(`[HeapMon] ${mb.toFixed(1)} MB`);
+  }, intervalSec * 1000);
+  console.log(`[HeapMon] Started — sampling every ${intervalSec}s, alert on +${thresholdMB}MB/${windowMin}min`);
+};

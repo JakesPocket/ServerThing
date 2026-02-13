@@ -67,7 +67,7 @@ class CounterApp {
   }
 
   sendNavState(isAtRoot) {
-    window.parent.postMessage({ type: 'APP_NAV_STATE', atRoot: isAtRoot }, '*');
+    window.parent.postMessage({ type: 'APP_NAV_STATE', atRoot: isAtRoot }, location.origin);
   }
 }
 
