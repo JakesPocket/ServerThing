@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ServerThing Simulator</title>
+  <link rel="stylesheet" href="sim.css">
+</head>
+<body>
+
+  <!-- Device Frame -->
+  <div id="device">
+
+    <!-- Top Bezel: Preset Buttons -->
+    <div id="top-bezel">
+      <button class="preset-btn" data-btn="preset_1">1</button>
+      <button class="preset-btn" data-btn="preset_2">2</button>
+      <button class="preset-btn" data-btn="preset_3">3</button>
+      <button class="preset-btn" data-btn="preset_4">4</button>
+      <button class="preset-btn preset-settings" data-btn="settings">⚙</button>
+    </div>
+
+    <!-- Screen -->
+    <div id="screen-bezel">
+      <div id="screen-viewport">
+        <iframe id="shell-frame" src="/shell/index.html" scrolling="no" sandbox="allow-scripts allow-same-origin"></iframe>
+      </div>
+    </div>
+
+    <!-- Right-side controls: Dial + Back button -->
+    <div id="right-controls">
+      <div id="dial" tabindex="0" role="button" aria-label="Rotary Dial">
+        <div id="dial-knob">
+          <div id="dial-notch"></div>
+        </div>
+        <span id="dial-label">DIAL</span>
+      </div>
+      <button id="back-btn" data-btn="back_button">◀ BACK</button>
+    </div>
+
+  </div>
+
+  <!-- HUD -->
+  <div id="hud">
+    <span id="hud-title">ServerThing Simulator</span>
+    <span id="hud-hint">Arrow Keys = Dial &nbsp;|&nbsp; Enter = Click &nbsp;|&nbsp; Esc = Back &nbsp;|&nbsp; Scroll on Dial = Rotate</span>
+  </div>
+
+  <script src="sim.js"></script>
+</body>
+</html>

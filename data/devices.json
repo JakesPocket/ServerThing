@@ -449,5 +449,29 @@
     "connected": false,
     "lastSeen": 1771003697642,
     "inputs": []
+  },
+  {
+    "id": "device-1771004559194",
+    "connected": false,
+    "lastSeen": 1771004642848,
+    "inputs": []
+  },
+  {
+    "id": "device-1771004648231",
+    "connected": false,
+    "lastSeen": 1771004747231,
+    "inputs": []
+  },
+  {
+    "id": "device-1771004751242",
+    "connected": false,
+    "lastSeen": 1771027531245,
+    "inputs": []
+  },
+  {
+    "id": "device-1771027531438",
+    "connected": false,
+    "lastSeen": 1771027531448,
+    "inputs": []
   }
 ]
