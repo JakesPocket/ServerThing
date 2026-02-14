@@ -200,11 +200,7 @@ class ShellRuntime {
     this.deviceId = `shell-${Date.now()}`;
     this.iconManager = new IconManager();
     this.configManager = new ConfigManager();
-    this.apps = [
-      { id: 'counter', name: 'Counter', enabled: true },
-      { id: 'makemkv-key', name: 'MakeMKV Manager', enabled: true },
-      { id: 'stress-test', name: 'SuperLongAppNameTe', enabled: true },
-    ];
+    this.apps = []; // Populated via WebSocket from server
     this.currentApp = { id: null, iframe: null, atRoot: true };
     this.interactionMode = 'dial';
     this.focusedAppIndex = 0;
@@ -285,8 +281,61 @@ class ShellRuntime {
   }
 
   handleServerMessage(msg) {
-    // Extensible: handle future server-pushed events here
     console.log('[Shell] Server message:', msg.type);
+    
+    switch (msg.type) {
+      case MessageType.S2D_CONNECTED:
+        console.log(`[Shell] Device registered as ${msg.deviceId}`);
+        if (msg.apps) {
+          this.apps = msg.apps;
+          this.renderAppGrid();
+        }
+        break;
+
+      case MessageType.S2D_APPS_RELOADED:
+        console.log('[Shell] Apps reloaded on server');
+        if (msg.apps) {
+          this.apps = msg.apps;
+          this.renderAppGrid();
+        }
+        break;
+
+      case MessageType.S2D_APP_ENABLED:
+      case MessageType.S2D_APP_DISABLED:
+        // For performance, we could just toggle enabled state, but 
+        // a full refresh is safer for now.
+        this.fetchApps();
+        break;
+
+      case MessageType.S2D_APP_RESPONSE:
+        this.forwardToActiveApp(msg);
+        break;
+
+      case MessageType.S2D_INPUT_RECEIVED:
+        // Feedback if needed
+        break;
+    }
+  }
+
+  /** Fetch latest app list from REST API as a fallback. */
+  async fetchApps() {
+    try {
+      const res = await fetch('/api/apps');
+      const apps = await res.json();
+      this.apps = apps;
+      this.renderAppGrid();
+    } catch (err) {
+      console.error('[Shell] Failed to fetch apps:', err);
+    }
+  }
+
+  forwardToActiveApp(msg) {
+    if (this.currentApp.iframe && this.currentApp.iframe.contentWindow) {
+      this.currentApp.iframe.contentWindow.postMessage({
+        type: 'server-message',
+        message: msg
+      }, '*');
+    }
   }
 
   setInteractionMode(mode) {
@@ -622,6 +671,11 @@ class ShellRuntime {
     const orderedIds  = this.configManager.syncOrder(enabledIds);
     const appMap      = Object.fromEntries(enabledApps.map(a => [a.id, a]));
     const sortedApps  = orderedIds.map(id => appMap[id]).filter(Boolean);
+
+    // Clamp focus index to avoid out-of-bounds on refresh (e.g. if an app was removed)
+    if (this.focusedAppIndex >= sortedApps.length && sortedApps.length > 0) {
+      this.focusedAppIndex = Math.max(0, sortedApps.length - 1);
+    }
 
     this.elements.appGrid.innerHTML = sortedApps.map((app, index) => {
       // Apply icon & name overrides from ConfigManager

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spotify - ServerThing</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #121212;
+            color: white;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+            text-align: center;
+        }
+
+        #album-art {
+            width: 250px;
+            height: 250px;
+            background: #282828;
+            border-radius: 8px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.5);
+            margin-bottom: 20px;
+            background-size: cover;
+            background-position: center;
+        }
+
+        #track-name {
+            font-size: 24px;
+            font-weight: bold;
+            margin: 10px 0 5px 0;
+            width: 90%;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        #artist-name {
+            font-size: 18px;
+            color: #b3b3b3;
+            margin-bottom: 30px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 20px;
+        }
+
+        .btn {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 32px;
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+
+        .btn:active {
+            transform: scale(0.9);
+            color: #1DB954;
+        }
+
+        #progress-container {
+            width: 80%;
+            height: 4px;
+            background: #4f4f4f;
+            border-radius: 2px;
+            margin-top: 40px;
+        }
+
+        #progress-bar {
+            width: 30%;
+            height: 100%;
+            background: #1DB954;
+            border-radius: 2px;
+        }
+    </style>
+</head>
+<body>
+    <div id="album-art" style="background-image: url('https://picsum.photos/400')"></div>
+    <div id="track-name">Not Connected</div>
+    <div id="artist-name">Sign in to Spotify</div>
+
+    <div class="controls">
+        <button class="btn" onclick="DeskThing.send({type: 'input', value: 'previous'})">⏮</button>
+        <button class="btn" onclick="DeskThing.send({type: 'input', value: 'toggle'})" id="play-btn">▶️</button>
+        <button class="btn" onclick="DeskThing.send({type: 'input', value: 'next'})">⏭</button>
+    </div>
+
+    <div id="progress-container">
+        <div id="progress-bar"></div>
+    </div>
+
+    <!-- The Bridge to ServerThing -->
+    <script src="/ui/deskthing-bridge.js"></script>
+    <script>
+        // Use the DeskThing bridge to listen for real-time updates from our backend
+        DeskThing.on('app-data', (data) => {
+            if (data.type === 'track-update') {
+                document.getElementById('track-name').innerText = data.track;
+                document.getElementById('artist-name').innerText = data.artist;
+                document.getElementById('album-art').style.backgroundImage = `url('${data.art}')`;
+                document.getElementById('play-btn').innerText = data.isPlaying ? '⏸' : '▶️';
+            }
+        });
+
+        // Periodic simulated update for progress bar
+        setInterval(() => {
+            const bar = document.getElementById('progress-bar');
+            let w = parseInt(bar.style.width) || 30;
+            w = (w + 0.5) % 100;
+            bar.style.width = w + '%';
+        }, 1000);
+    </script>
+</body>
+</html>

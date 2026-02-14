@@ -6,6 +6,7 @@ const fs = require('fs');
 const { MessageType } = require('../shared/protocol.js');
 const multer = require('multer');
 const AdmZip = require('adm-zip');
+const adbManager = require('./adb-manager');
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = path.join(__dirname, '..', 'data');
@@ -176,24 +177,66 @@ class AppManager {
     const entries = fs.readdirSync(appsDir, { withFileTypes: true });
     for (const entry of entries) {
       if (entry.isDirectory()) {
-        const appPath = path.join(appsDir, entry.name, 'index.js');
-        const publicUiPath = path.join(appsDir, entry.name, 'public');
+        const appFolderPath = path.join(appsDir, entry.name);
+        const appPath = path.join(appFolderPath, 'index.js');
+        const manifestPath = path.join(appFolderPath, 'manifest.json');
+        const publicUiPath = path.join(appFolderPath, 'public');
         
+        let manifest = {};
+        if (fs.existsSync(manifestPath)) {
+          try {
+            manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+          } catch (err) {
+            console.error(`Error reading manifest for app ${entry.name}:`, err.message);
+          }
+        }
+
         if (fs.existsSync(appPath)) {
           try {
             // Clear require cache to allow hot reload on server restart
             delete require.cache[require.resolve(appPath)];
-            const app = require(appPath);
+            const appInstance = require(appPath);
+            
             this.apps.set(entry.name, {
               id: entry.name,
+              name: manifest.name || entry.name,
+              description: manifest.description || '',
+              version: manifest.version || '1.0.0',
+              author: manifest.author || 'Unknown',
               enabled: true, // Default to enabled
-              instance: app,
+              instance: appInstance,
               hasPublicUI: fs.existsSync(publicUiPath),
-              ...app.metadata
+              ...appInstance.metadata,
+              manifest: manifest
             });
+
+            // If the app has an init method, run it with context
+            if (typeof appInstance.init === 'function') {
+              const context = {
+                onInput: (handler) => {
+                  const appEntry = this.apps.get(entry.name);
+                  if (appEntry) appEntry.inputHandler = handler.bind(appInstance);
+                },
+                sendToDevice: (deviceId, data) => {
+                  broadcastDevices({ appId: entry.name, ...data }, deviceId);
+                }
+              };
+              appInstance.init(context);
+            }
           } catch (err) {
             console.error(`Failed to load app ${entry.name}:`, err.message);
           }
+        } else if (fs.existsSync(publicUiPath)) {
+          // Pure UI apps (compatibility with some DeskThing patterns)
+          this.apps.set(entry.name, {
+            id: entry.name,
+            name: manifest.name || entry.name,
+            description: manifest.description || '',
+            version: manifest.version || '1.0.0',
+            enabled: true,
+            hasPublicUI: true,
+            manifest: manifest
+          });
         }
       }
     }
@@ -234,17 +277,25 @@ class AppManager {
   }
 
   /**
-   * Note: With nodemon, a server restart is required to apply app changes.
-   * This function is kept for potential future use or manual triggering.
+   * Reloads all apps from disk and broadcasts the change.
    */
   reloadApps() {
-    console.log('App reload requested. Please restart the server to apply changes.');
+    console.log('[AppManager] Reloading apps from disk...');
+    this.apps.clear();
+    this.loadApps();
   }
 
   handleInput(appId, deviceId, input) {
     const app = this.apps.get(appId);
-    if (app && app.enabled && app.instance.handleInput) {
-      return app.instance.handleInput(deviceId, input);
+    if (app && app.enabled) {
+      // Priority 1: New dynamic inputHandler from .init()
+      if (app.inputHandler) {
+        return app.inputHandler(input);
+      }
+      // Priority 2: Legacy static handleInput method
+      if (app.instance && typeof app.instance.handleInput === 'function') {
+        return app.instance.handleInput(deviceId, input);
+      }
     }
     return null;
   }
@@ -297,6 +348,19 @@ const uiConnections = new Set();
 function broadcastUI(data) {
   const message = JSON.stringify(data);
   uiConnections.forEach(ws => {
+    if (ws.readyState === 1) { // WebSocket.OPEN
+      ws.send(message);
+    }
+  });
+}
+
+/**
+ * Broadcasts a message to all connected devices.
+ * @param {object} data The data to send.
+ */
+function broadcastDevices(data) {
+  const message = JSON.stringify(data);
+  deviceConnections.forEach(ws => {
     if (ws.readyState === 1) { // WebSocket.OPEN
       ws.send(message);
     }
@@ -431,19 +495,22 @@ app.get('/api/apps', (req, res) => {
   res.json(appManager.getApps());
 });
 
+app.post('/api/apps/reload', (req, res) => {
+  appManager.reloadApps();
+  broadcastUI({ type: MessageType.S2U_APPS_CHANGED });
+  broadcastDevices({ type: MessageType.S2D_APPS_RELOADED, apps: appManager.getApps() });
+  res.json({ success: true, message: 'Apps reloaded' });
+});
+
 app.post('/api/apps/:appId/enable', (req, res) => {
   const { appId } = req.params;
   if (appManager.enableApp(appId)) {
     res.json({ success: true, message: `App ${appId} enabled` });
     
     // Notify all connected devices
-    deviceConnections.forEach(ws => {
-      if (ws.readyState === 1) { // WebSocket.OPEN
-        ws.send(JSON.stringify({
-          type: MessageType.S2D_APP_ENABLED,
-          appId
-        }));
-      }
+    broadcastDevices({
+      type: MessageType.S2D_APP_ENABLED,
+      appId
     });
     broadcastUI({ type: MessageType.S2U_APPS_CHANGED });
   } else {
@@ -457,13 +524,9 @@ app.post('/api/apps/:appId/disable', (req, res) => {
     res.json({ success: true, message: `App ${appId} disabled` });
     
     // Notify all connected devices
-    deviceConnections.forEach(ws => {
-      if (ws.readyState === 1) { // WebSocket.OPEN
-        ws.send(JSON.stringify({
-          type: MessageType.S2D_APP_DISABLED,
-          appId
-        }));
-      }
+    broadcastDevices({
+      type: MessageType.S2D_APP_DISABLED,
+      appId
     });
     broadcastUI({ type: MessageType.S2U_APPS_CHANGED });
   } else {
@@ -511,6 +574,49 @@ app.post('/api/apps/install', upload.single('app-zip'), (req, res) => {
     }
     res.status(500).json({ success: false, message: 'Failed to extract or install app.' });
   }
+});
+
+// --- Admin API Routes ---
+
+/**
+ * Scan for connected ADB devices and attempt setup.
+ */
+app.post('/api/admin/scan-devices', async (req, res) => {
+  try {
+    const isAdbAvailable = await adbManager.checkADB();
+    if (!isAdbAvailable) {
+      return res.status(500).json({ error: 'ADB not found on server. Please install platform-tools.' });
+    }
+
+    const deviceIds = await adbManager.listDevices();
+    const results = [];
+
+    for (const id of deviceIds) {
+      try {
+        const url = await adbManager.setupDevice(id, PORT);
+        results.push({ id, status: 'success', serverURL: url });
+      } catch (err) {
+        results.push({ id, status: 'error', error: err.message });
+      }
+    }
+
+    res.json({ devices: results });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Get system status (ADB, IP, etc.)
+ */
+app.get('/api/admin/status', async (req, res) => {
+  const adbAvailable = await adbManager.checkADB();
+  res.json({
+    adbAvailable,
+    localIP: adbManager.getLocalIP(),
+    serverPort: PORT,
+    platform: os.platform()
+  });
 });
 
 // Start server
