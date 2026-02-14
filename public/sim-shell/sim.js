@@ -1,17 +1,31 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// ServerThing Simulator — Input Bridge
-// Translates mouse / keyboard interactions into hardware events for the
-// shell iframe.  Supports long-press detection on all buttons.
+// ServerThing Simulator — Input Bridge (Hotspot Edition)
+//
+// Translates mouse / keyboard / touch-panel interactions into hardware
+// events for the Shell iframe.  All physical controls are represented as
+// percentage-positioned hotspots over the device image.
+//
+// Controls:
+//   Preset 1-4 & Settings  →  click
+//   Dial                    →  scroll (rotate), click (select), hold (back)
+//   Back Button             →  click (back), hold (home)
+//   Touch Panel             →  swipe-left / swipe-right
+//   Iframe                  →  direct click/tap (screen touch)
+//   Keyboard                →  arrows, enter, esc, 1-4
 // ═══════════════════════════════════════════════════════════════════════════
 
 (function () {
   'use strict';
 
-  const frame   = document.getElementById('shell-frame');
-  const dial    = document.getElementById('dial');
-  const backBtn = document.getElementById('back-btn');
+  // ── Elements ──────────────────────────────────────────────────────────
 
-  // ── Core: call into the shell runtime directly ─────────────────────────
+  const frame       = document.getElementById('shell-frame');
+  const deviceFrame = document.getElementById('device-frame');
+  const deviceImage = document.getElementById('device-image');
+  const hsDial      = document.getElementById('hs-dial');
+  const hsBack      = document.getElementById('hs-back');
+
+  // ── Core: call into the shell runtime directly ────────────────────────
 
   function callShell(input) {
     try {
@@ -22,150 +36,182 @@
     } catch { /* cross-origin guard */ }
   }
 
-  /** Dispatch a keyboard event into the shell iframe. */
-  function sendKey(key) {
-    try {
-      const win = frame.contentWindow;
-      if (!win) return;
-      win.dispatchEvent(new KeyboardEvent('keydown', {
-        key,
-        code: key,
-        bubbles: true,
-        cancelable: true,
-      }));
-    } catch { /* cross-origin guard */ }
-  }
+  // ── Visual Feedback ───────────────────────────────────────────────────
 
-  /** Visual feedback: briefly add a class, then remove it. */
-  function flash(el, cls, ms = 120) {
+  /** Briefly add a CSS class for animation, forcing reflow to restart. */
+  function flash(el, cls, ms = 250) {
+    el.classList.remove(cls);
+    void el.offsetWidth;           // force reflow → restart animation
     el.classList.add(cls);
     setTimeout(() => el.classList.remove(cls), ms);
   }
 
-  // ── Prevent context menu on all sim controls ──────────────────────────
+  // ── Iframe Scaling ────────────────────────────────────────────────────
+  // Shell renders at native 800×480.  We scale the iframe element to fit
+  // the screen area within the device image using transform: scale().
+  // Fractions represent how much of the image's width/height the screen occupies.
+  // Calibrated to grande_spotify-car-thing.jpg (1940×1320).
 
-  document.getElementById('device').addEventListener('contextmenu', e => e.preventDefault());
-  const controlPanel = document.getElementById('control-panel');
-  if (controlPanel) controlPanel.addEventListener('contextmenu', e => e.preventDefault());
+  const SCREEN_FRAC_X = 0.5315;   // screen width  / image width
+  const SCREEN_FRAC_Y = 0.4618;   // screen height / image height
 
-  // ── Long-press helper ─────────────────────────────────────────────────
-  // Sends button_down on pointerdown, button_up on pointerup.
-  // The shell's handleBackButtonDown/Up already has the 250ms threshold.
+  function updateFrameScale() {
+    const imgW = deviceImage.offsetWidth;
+    const imgH = deviceImage.offsetHeight;
+    if (imgW <= 0 || imgH <= 0) return;
+    const scaleX = (imgW * SCREEN_FRAC_X) / 800;
+    const scaleY = (imgH * SCREEN_FRAC_Y) / 480;
+    frame.style.transform = `scale(${scaleX}, ${scaleY})`;
+  }
 
-  function bindButton(el, downValue, upValue) {
+  window.addEventListener('resize', updateFrameScale);
+
+  // Run once the image has loaded so dimensions are correct.
+  if (deviceImage.complete) {
+    updateFrameScale();
+  } else {
+    deviceImage.addEventListener('load', updateFrameScale);
+  }
+
+  // ── Prevent Context Menu on Sim Controls ──────────────────────────────
+
+  deviceFrame.addEventListener('contextmenu', e => e.preventDefault());
+  const touchPanel = document.getElementById('touch-panel');
+  if (touchPanel) touchPanel.addEventListener('contextmenu', e => e.preventDefault());
+
+  // ═════════════════════════════════════════════════════════════════════
+  //  LONG-PRESS HELPER
+  //  Used by all hardware buttons.
+  //   Short press  (<250 ms)  →  fires shortAction callback
+  //   Long press   (≥250 ms)  →  fires longAction callback
+  //  Visual: 'pressing' class on pointerdown, 'held' on long threshold.
+  // ═════════════════════════════════════════════════════════════════════
+
+  const LONG_PRESS_MS = 250;
+
+  function bindLongPress(el, { onShort, onLong, onRelease }) {
+    let timer = null;
+    let isLong = false;
+
     el.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       el.setPointerCapture(e.pointerId);
-      el.classList.add('held');
-      callShell({ type: 'button', value: downValue });
+      el.classList.add('pressing');
+      isLong = false;
+
+      timer = setTimeout(() => {
+        isLong = true;
+        el.classList.remove('pressing');
+        el.classList.add('held');
+        if (onLong) onLong();
+      }, LONG_PRESS_MS);
     });
 
     el.addEventListener('pointerup', (e) => {
       el.releasePointerCapture(e.pointerId);
-      el.classList.remove('held');
-      if (upValue) callShell({ type: 'button', value: upValue });
+      el.classList.remove('pressing', 'held');
+      clearTimeout(timer);
+
+      if (!isLong) {
+        if (onShort) onShort();
+        flash(el, 'pulse');
+      } else {
+        if (onRelease) onRelease();
+      }
+      isLong = false;
     });
 
     el.addEventListener('pointercancel', (e) => {
       el.releasePointerCapture(e.pointerId);
-      el.classList.remove('held');
-      if (upValue) callShell({ type: 'button', value: upValue });
+      el.classList.remove('pressing', 'held');
+      clearTimeout(timer);
+      if (isLong && onRelease) onRelease();
+      isLong = false;
     });
 
-    // Prevent context menu specifically on this element
     el.addEventListener('contextmenu', e => e.preventDefault());
   }
 
-  // ── Dial: Scroll → Rotate ─────────────────────────────────────────────
+  // ═════════════════════════════════════════════════════════════════════
+  //  PRESET BUTTONS  (short = preset action, long = held visual)
+  // ═════════════════════════════════════════════════════════════════════
+
+  document.querySelectorAll('.hotspot-preset').forEach(hs => {
+    bindLongPress(hs, {
+      onShort: () => callShell({ type: 'button', value: hs.dataset.action }),
+      onLong:  () => callShell({ type: 'button', value: hs.dataset.action + '_long' }),
+    });
+  });
+
+  // ═════════════════════════════════════════════════════════════════════
+  //  DIAL — Scroll → Rotate
+  // ═════════════════════════════════════════════════════════════════════
 
   let wheelAccum = 0;
   const WHEEL_THRESHOLD = 40;
 
-  dial.addEventListener('wheel', (e) => {
+  hsDial.addEventListener('wheel', (e) => {
     e.preventDefault();
     wheelAccum += e.deltaY;
     while (Math.abs(wheelAccum) >= WHEEL_THRESHOLD) {
       if (wheelAccum > 0) {
         callShell({ type: 'dial', value: 'right' });
-        flash(dial, 'rotating-right');
+        flash(hsDial, 'rotating-right');
         wheelAccum -= WHEEL_THRESHOLD;
       } else {
         callShell({ type: 'dial', value: 'left' });
-        flash(dial, 'rotating-left');
+        flash(hsDial, 'rotating-left');
         wheelAccum += WHEEL_THRESHOLD;
       }
     }
   }, { passive: false });
 
-  // ── Dial: Click → dial_click_down ─────────────────────────────────────
+  // ═════════════════════════════════════════════════════════════════════
+  //  DIAL — Click + Long Press
+  //   Short click  (<250 ms)  →  dial_click_down  (select / enter)
+  //   Long press   (≥250 ms)  →  back navigation  (cancel / back)
+  // ═════════════════════════════════════════════════════════════════════
 
-  dial.addEventListener('click', () => {
-    callShell({ type: 'button', value: 'dial_click_down' });
-    flash(dial, 'pressing', 100);
+  bindLongPress(hsDial, {
+    onShort: () => callShell({ type: 'button', value: 'dial_click_down' }),
+    onLong:  () => callShell({ type: 'button', value: 'back_button_down' }),
+    onRelease: () => callShell({ type: 'button', value: 'back_button_up' }),
   });
 
-  // ── Back Button: long-press aware ─────────────────────────────────────
+  // ═════════════════════════════════════════════════════════════════════
+  //  BACK BUTTON — Long-press aware
+  //   Short press  (<250 ms)  →  short back (back_button_down + up)
+  //   Long press   (≥250 ms)  →  home (held down until release)
+  // ═════════════════════════════════════════════════════════════════════
 
-  bindButton(backBtn, 'back_button_down', 'back_button_up');
+  bindLongPress(hsBack, {
+    onShort:   () => {
+      callShell({ type: 'button', value: 'back_button_down' });
+      setTimeout(() => callShell({ type: 'button', value: 'back_button_up' }), 20);
+    },
+    onLong:    () => callShell({ type: 'button', value: 'back_button_down' }),
+    onRelease: () => callShell({ type: 'button', value: 'back_button_up' }),
+  });
 
-  // ── Preset Buttons ────────────────────────────────────────────────────
+  // ═════════════════════════════════════════════════════════════════════
+  //  TOUCH PANEL  (Swipe Left / Swipe Right)
+  // ═════════════════════════════════════════════════════════════════════
 
-  document.querySelectorAll('.preset-btn').forEach(btn => {
+  document.querySelectorAll('[data-sim]').forEach(btn => {
+    const action = btn.dataset.sim;
     btn.addEventListener('click', (e) => {
       e.preventDefault();
-      const id = btn.dataset.btn;
       btn.classList.add('active');
       setTimeout(() => btn.classList.remove('active'), 150);
-      callShell({ type: 'button', value: id });
+
+      if (action === 'swipe-left')  callShell({ type: 'touch', value: 'swipe-left' });
+      if (action === 'swipe-right') callShell({ type: 'touch', value: 'swipe-right' });
     });
   });
 
-  // ── Control Panel Buttons ─────────────────────────────────────────────
-
-  // Dial buttons in control panel
-  document.querySelectorAll('[data-sim]').forEach(btn => {
-    const action = btn.dataset.sim;
-
-    if (action === 'back') {
-      // Long-press aware
-      bindButton(btn, 'back_button_down', 'back_button_up');
-    } else {
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        btn.classList.add('active');
-        setTimeout(() => btn.classList.remove('active'), 150);
-
-        switch (action) {
-          case 'dial-left':
-            callShell({ type: 'dial', value: 'left' });
-            flash(dial, 'rotating-left');
-            break;
-          case 'dial-right':
-            callShell({ type: 'dial', value: 'right' });
-            flash(dial, 'rotating-right');
-            break;
-          case 'dial-click':
-            callShell({ type: 'button', value: 'dial_click_down' });
-            flash(dial, 'pressing', 100);
-            break;
-          case 'preset_1': case 'preset_2': case 'preset_3': case 'preset_4': case 'settings':
-            callShell({ type: 'button', value: action });
-            break;
-          case 'swipe-left':
-            callShell({ type: 'touch', value: 'swipe-left' });
-            break;
-          case 'swipe-right':
-            callShell({ type: 'touch', value: 'swipe-right' });
-            break;
-          case 'tap':
-            callShell({ type: 'touch', value: 'tap' });
-            break;
-        }
-      });
-    }
-  });
-
-  // ── Keyboard Shortcuts ────────────────────────────────────────────────
+  // ═════════════════════════════════════════════════════════════════════
+  //  KEYBOARD SHORTCUTS
+  // ═════════════════════════════════════════════════════════════════════
 
   let escHeld = false;
 
@@ -176,40 +222,43 @@
       case 'ArrowLeft':
         e.preventDefault();
         callShell({ type: 'dial', value: 'left' });
-        flash(dial, 'rotating-left');
+        flash(hsDial, 'rotating-left');
         break;
       case 'ArrowRight':
         e.preventDefault();
         callShell({ type: 'dial', value: 'right' });
-        flash(dial, 'rotating-right');
+        flash(hsDial, 'rotating-right');
         break;
       case 'ArrowUp':
         e.preventDefault();
         callShell({ type: 'dial', value: 'up' });
-        flash(dial, 'rotating-left');
+        flash(hsDial, 'rotating-left');
         break;
       case 'ArrowDown':
         e.preventDefault();
         callShell({ type: 'dial', value: 'down' });
-        flash(dial, 'rotating-right');
+        flash(hsDial, 'rotating-right');
         break;
       case 'Enter':
         e.preventDefault();
         callShell({ type: 'button', value: 'dial_click_down' });
-        flash(dial, 'pressing', 100);
+        flash(hsDial, 'pulse');
         break;
       case 'Escape':
       case 'Backspace':
         e.preventDefault();
         if (!escHeld) {
           escHeld = true;
+          hsBack.classList.add('held');
           callShell({ type: 'button', value: 'back_button_down' });
-          backBtn.classList.add('held');
         }
         break;
       case '1': case '2': case '3': case '4': {
-        const pbtn = document.querySelector(`.preset-btn[data-btn="preset_${e.key}"]`);
-        if (pbtn) pbtn.click();
+        const hs = document.getElementById(`hs-preset-${e.key}`);
+        if (hs) {
+          flash(hs, 'pulse');
+          callShell({ type: 'button', value: `preset_${e.key}` });
+        }
         break;
       }
     }
@@ -219,15 +268,18 @@
     if (e.key === 'Escape' || e.key === 'Backspace') {
       if (escHeld) {
         escHeld = false;
+        hsBack.classList.remove('held');
         callShell({ type: 'button', value: 'back_button_up' });
-        backBtn.classList.remove('held');
       }
     }
   });
 
-  // ── Wire the shell to accept SIM_HARDWARE_EVENT from the simulator ────
+  // ═════════════════════════════════════════════════════════════════════
+  //  SIM_HARDWARE_EVENT bridge  (iframe → sim → shell)
+  // ═════════════════════════════════════════════════════════════════════
 
   frame.addEventListener('load', () => {
+    updateFrameScale();
     try {
       const win = frame.contentWindow;
       win.addEventListener('message', (e) => {

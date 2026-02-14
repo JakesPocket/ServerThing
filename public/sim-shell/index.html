@@ -4,74 +4,73 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ServerThing Simulator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="sim.css">
 </head>
 <body>
 
-  <!-- Device Frame -->
-  <div id="device">
+  <div id="simulator">
 
-    <!-- Top Bezel: Preset Buttons -->
-    <div id="top-bezel">
-      <button class="preset-btn" data-btn="preset_1">1</button>
-      <button class="preset-btn" data-btn="preset_2">2</button>
-      <button class="preset-btn" data-btn="preset_3">3</button>
-      <button class="preset-btn" data-btn="preset_4">4</button>
-      <button class="preset-btn preset-settings" data-btn="settings">⚙</button>
-    </div>
+    <!-- Device Frame: three-layer stack -->
+    <div id="device-frame">
 
-    <!-- Screen -->
-    <div id="screen-bezel">
-      <div id="screen-viewport">
-        <iframe id="shell-frame" src="/shell/index.html" scrolling="no" sandbox="allow-scripts allow-same-origin"></iframe>
-      </div>
-    </div>
+      <!-- Layer 1 (Base): Hardware Image -->
+      <img id="device-image" src="Image/grande_spotify-car-thing.jpg"
+           alt="Spotify Car Thing" draggable="false">
 
-    <!-- Right-side controls: Dial + Back button -->
-    <div id="right-controls">
-      <div id="dial" tabindex="0" role="button" aria-label="Rotary Dial">
-        <div id="dial-knob">
-          <div id="dial-notch"></div>
+      <!-- Layer 2 (Middle): Shell Iframe — positioned over screen area -->
+      <iframe id="shell-frame" src="/shell/index.html"
+              scrolling="no" sandbox="allow-scripts allow-same-origin"></iframe>
+
+      <!-- Layer 2.5: Dial overlay — image dial rendered on top of iframe -->
+      <div id="dial-overlay"></div>
+
+      <!-- Layer 3 (Top): Interaction Hotspots -->
+      <div id="hotspots">
+
+        <!-- Preset Buttons (top bezel) -->
+        <div class="hotspot hotspot-preset" id="hs-preset-1" data-action="preset_1">
+          <span class="hs-label">1</span>
         </div>
-        <span id="dial-label">DIAL</span>
+        <div class="hotspot hotspot-preset" id="hs-preset-2" data-action="preset_2">
+          <span class="hs-label">2</span>
+        </div>
+        <div class="hotspot hotspot-preset" id="hs-preset-3" data-action="preset_3">
+          <span class="hs-label">3</span>
+        </div>
+        <div class="hotspot hotspot-preset" id="hs-preset-4" data-action="preset_4">
+          <span class="hs-label">4</span>
+        </div>
+        <div class="hotspot hotspot-preset" id="hs-settings" data-action="settings">
+          <span class="hs-label">⚙</span>
+        </div>
+
+        <!-- Dial (circular hotspot) -->
+        <div class="hotspot hotspot-circle" id="hs-dial">
+          <span class="hs-label hs-label-dial">DIAL</span>
+        </div>
+
+        <!-- Back Button (circular hotspot) -->
+        <div class="hotspot hotspot-circle" id="hs-back">
+          <span class="hs-label hs-label-back">BACK</span>
+        </div>
+
       </div>
-      <button id="back-btn" data-btn="back_button">◀ BACK</button>
     </div>
 
-  </div>
+    <!-- Touch Controls Panel (below simulator frame) -->
+    <div id="touch-panel">
+      <button class="tp-btn" data-sim="swipe-left">&#10550; Swipe Left</button>
+      <button class="tp-btn" data-sim="swipe-right">Swipe Right &#10551;</button>
+    </div>
 
-  <!-- HUD -->
-  <div id="hud">
-    <span id="hud-title">ServerThing Simulator</span>
-    <span id="hud-hint">Arrow Keys = Dial &nbsp;|&nbsp; Enter = Click &nbsp;|&nbsp; Hold Esc = Long-press Back &nbsp;|&nbsp; Scroll on Dial = Rotate</span>
-  </div>
+    <!-- HUD: keyboard hints (inside flow so it doesn't overlap) -->
+    <div id="hud">
+      <span id="hud-hint">Scroll on Dial = Rotate &middot; Arrow Keys = Dial &middot; Enter = Click &middot; Hold Esc = Long-press Back</span>
+    </div>
 
-  <!-- Control Panel -->
-  <div id="control-panel">
-    <div class="cp-group">
-      <span class="cp-label">Presets</span>
-      <button class="cp-btn" data-sim="preset_1">P1</button>
-      <button class="cp-btn" data-sim="preset_2">P2</button>
-      <button class="cp-btn" data-sim="preset_3">P3</button>
-      <button class="cp-btn" data-sim="preset_4">P4</button>
-      <button class="cp-btn" data-sim="settings">⚙</button>
-    </div>
-    <div class="cp-group">
-      <span class="cp-label">Dial</span>
-      <button class="cp-btn" data-sim="dial-left">◀ Left</button>
-      <button class="cp-btn cp-accent" data-sim="dial-click">Click</button>
-      <button class="cp-btn" data-sim="dial-right">Right ▶</button>
-    </div>
-    <div class="cp-group">
-      <span class="cp-label">Navigation</span>
-      <button class="cp-btn cp-back" data-sim="back">◀ Back (hold for long-press)</button>
-    </div>
-    <div class="cp-group">
-      <span class="cp-label">Touch</span>
-      <button class="cp-btn" data-sim="swipe-left">Swipe ◀</button>
-      <button class="cp-btn" data-sim="tap">Tap</button>
-      <button class="cp-btn" data-sim="swipe-right">Swipe ▶</button>
-    </div>
   </div>
 
   <script src="sim.js"></script>
