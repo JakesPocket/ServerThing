@@ -43,7 +43,35 @@
   <!-- HUD -->
   <div id="hud">
     <span id="hud-title">ServerThing Simulator</span>
-    <span id="hud-hint">Arrow Keys = Dial &nbsp;|&nbsp; Enter = Click &nbsp;|&nbsp; Esc = Back &nbsp;|&nbsp; Scroll on Dial = Rotate</span>
+    <span id="hud-hint">Arrow Keys = Dial &nbsp;|&nbsp; Enter = Click &nbsp;|&nbsp; Hold Esc = Long-press Back &nbsp;|&nbsp; Scroll on Dial = Rotate</span>
+  </div>
+
+  <!-- Control Panel -->
+  <div id="control-panel">
+    <div class="cp-group">
+      <span class="cp-label">Presets</span>
+      <button class="cp-btn" data-sim="preset_1">P1</button>
+      <button class="cp-btn" data-sim="preset_2">P2</button>
+      <button class="cp-btn" data-sim="preset_3">P3</button>
+      <button class="cp-btn" data-sim="preset_4">P4</button>
+      <button class="cp-btn" data-sim="settings">⚙</button>
+    </div>
+    <div class="cp-group">
+      <span class="cp-label">Dial</span>
+      <button class="cp-btn" data-sim="dial-left">◀ Left</button>
+      <button class="cp-btn cp-accent" data-sim="dial-click">Click</button>
+      <button class="cp-btn" data-sim="dial-right">Right ▶</button>
+    </div>
+    <div class="cp-group">
+      <span class="cp-label">Navigation</span>
+      <button class="cp-btn cp-back" data-sim="back">◀ Back (hold for long-press)</button>
+    </div>
+    <div class="cp-group">
+      <span class="cp-label">Touch</span>
+      <button class="cp-btn" data-sim="swipe-left">Swipe ◀</button>
+      <button class="cp-btn" data-sim="tap">Tap</button>
+      <button class="cp-btn" data-sim="swipe-right">Swipe ▶</button>
+    </div>
   </div>
 
   <script src="sim.js"></script>

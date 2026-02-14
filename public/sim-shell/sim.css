@@ -214,6 +214,7 @@ html, body {
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
   transition: background 0.1s, transform 0.08s, color 0.1s;
   margin-left: -20px;
+  touch-action: none;  /* prevent browser gestures */
 }
 
 #back-btn:hover {
@@ -221,10 +222,11 @@ html, body {
   color: rgba(255, 255, 255, 0.75);
 }
 
-#back-btn:active {
+#back-btn:active, #back-btn.held {
   transform: translateY(1px);
   background: #222226;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  color: #ff9800;
 }
 
 /* ─── HUD ───────────────────────────────────────────────────────────────── */
@@ -266,4 +268,101 @@ html, body {
 }
 @media (max-height: 550px) {
   #device { transform: scale(0.65); }
+}
+
+/* ─── Control Panel ─────────────────────────────────────────────────────── */
+#control-panel {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: rgba(30, 30, 34, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 200;
+  max-width: 240px;
+}
+
+.cp-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.cp-label {
+  width: 100%;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.25);
+  margin-bottom: 2px;
+}
+
+.cp-btn {
+  height: 30px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 6px;
+  background: #333338;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, transform 0.06s;
+  touch-action: none;
+}
+
+.cp-btn:hover {
+  background: #444448;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.cp-btn:active, .cp-btn.active {
+  background: #555558;
+  color: #fff;
+  transform: scale(0.96);
+}
+
+.cp-btn.held {
+  background: #ff9800;
+  color: #000;
+}
+
+.cp-accent {
+  background: #1565c0;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.cp-accent:hover {
+  background: #1976d2;
+}
+
+.cp-back {
+  flex: 1;
+  background: #3a2020;
+  color: rgba(255, 160, 160, 0.8);
+}
+
+.cp-back:hover {
+  background: #4a2828;
+  color: #ffa0a0;
+}
+
+.cp-back.held {
+  background: #ff5722;
+  color: #fff;
+}
+
+@media (max-width: 1200px) {
+  #control-panel {
+    top: auto;
+    bottom: 50px;
+    right: 16px;
+  }
 }

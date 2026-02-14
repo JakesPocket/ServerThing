@@ -473,5 +473,95 @@
     "connected": false,
     "lastSeen": 1771027531448,
     "inputs": []
+  },
+  {
+    "id": "device-1771037310995",
+    "connected": false,
+    "lastSeen": 1771037312539,
+    "inputs": []
+  },
+  {
+    "id": "device-1771037312797",
+    "connected": false,
+    "lastSeen": 1771037312921,
+    "inputs": []
+  },
+  {
+    "id": "device-1771037316984",
+    "connected": false,
+    "lastSeen": 1771047435125,
+    "inputs": []
+  },
+  {
+    "id": "device-1771047435353",
+    "connected": false,
+    "lastSeen": 1771047435936,
+    "inputs": []
+  },
+  {
+    "id": "device-1771047436089",
+    "connected": false,
+    "lastSeen": 1771047436091,
+    "inputs": []
+  },
+  {
+    "id": "device-1771047442272",
+    "connected": false,
+    "lastSeen": 1771047442593,
+    "inputs": []
+  },
+  {
+    "id": "device-1771047442800",
+    "connected": false,
+    "lastSeen": 1771047443437,
+    "inputs": []
+  },
+  {
+    "id": "device-1771047443593",
+    "connected": false,
+    "lastSeen": 1771047444034,
+    "inputs": []
+  },
+  {
+    "id": "device-1771047444217",
+    "connected": false,
+    "lastSeen": 1771047444218,
+    "inputs": []
+  },
+  {
+    "id": "device-1771047463108",
+    "connected": false,
+    "lastSeen": 1771047465793,
+    "inputs": []
+  },
+  {
+    "id": "device-1771047465961",
+    "connected": false,
+    "lastSeen": 1771047470554,
+    "inputs": []
+  },
+  {
+    "id": "device-1771047474573",
+    "connected": false,
+    "lastSeen": 1771047474574,
+    "inputs": []
+  },
+  {
+    "id": "device-1771047556842",
+    "connected": false,
+    "lastSeen": 1771047558193,
+    "inputs": []
+  },
+  {
+    "id": "device-1771047558440",
+    "connected": false,
+    "lastSeen": 1771048186128,
+    "inputs": []
+  },
+  {
+    "id": "device-1771048186332",
+    "connected": false,
+    "lastSeen": 1771048186333,
+    "inputs": []
   }
 ]

@@ -1,8 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // ServerThing Simulator — Input Bridge
 // Translates mouse / keyboard interactions into hardware events for the
-// shell iframe, using the same KeyboardEvent dispatch the shell already
-// listens for.
+// shell iframe.  Supports long-press detection on all buttons.
 // ═══════════════════════════════════════════════════════════════════════════
 
 (function () {
@@ -12,33 +11,29 @@
   const dial    = document.getElementById('dial');
   const backBtn = document.getElementById('back-btn');
 
-  // ── Helpers ────────────────────────────────────────────────────────────
+  // ── Core: call into the shell runtime directly ─────────────────────────
 
-  /** Dispatch a keyboard event into the shell iframe so the shell's own
-   *  keydown handler picks it up natively. */
+  function callShell(input) {
+    try {
+      const win = frame.contentWindow;
+      if (win && win.shell && typeof win.shell.handleHardwareInput === 'function') {
+        win.shell.handleHardwareInput(input);
+      }
+    } catch { /* cross-origin guard */ }
+  }
+
+  /** Dispatch a keyboard event into the shell iframe. */
   function sendKey(key) {
     try {
       const win = frame.contentWindow;
       if (!win) return;
       win.dispatchEvent(new KeyboardEvent('keydown', {
         key,
-        code: keyToCode(key),
+        code: key,
         bubbles: true,
         cancelable: true,
       }));
     } catch { /* cross-origin guard */ }
-  }
-
-  function keyToCode(key) {
-    switch (key) {
-      case 'ArrowLeft':  return 'ArrowLeft';
-      case 'ArrowRight': return 'ArrowRight';
-      case 'ArrowUp':    return 'ArrowUp';
-      case 'ArrowDown':  return 'ArrowDown';
-      case 'Enter':      return 'Enter';
-      case 'Escape':     return 'Escape';
-      default:           return '';
-    }
   }
 
   /** Visual feedback: briefly add a class, then remove it. */
@@ -47,114 +42,190 @@
     setTimeout(() => el.classList.remove(cls), ms);
   }
 
-  /** Flash a preset button. */
-  function flashPreset(btn) {
-    btn.classList.add('active');
-    setTimeout(() => btn.classList.remove('active'), 150);
+  // ── Prevent context menu on all sim controls ──────────────────────────
+
+  document.getElementById('device').addEventListener('contextmenu', e => e.preventDefault());
+  const controlPanel = document.getElementById('control-panel');
+  if (controlPanel) controlPanel.addEventListener('contextmenu', e => e.preventDefault());
+
+  // ── Long-press helper ─────────────────────────────────────────────────
+  // Sends button_down on pointerdown, button_up on pointerup.
+  // The shell's handleBackButtonDown/Up already has the 250ms threshold.
+
+  function bindButton(el, downValue, upValue) {
+    el.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      el.setPointerCapture(e.pointerId);
+      el.classList.add('held');
+      callShell({ type: 'button', value: downValue });
+    });
+
+    el.addEventListener('pointerup', (e) => {
+      el.releasePointerCapture(e.pointerId);
+      el.classList.remove('held');
+      if (upValue) callShell({ type: 'button', value: upValue });
+    });
+
+    el.addEventListener('pointercancel', (e) => {
+      el.releasePointerCapture(e.pointerId);
+      el.classList.remove('held');
+      if (upValue) callShell({ type: 'button', value: upValue });
+    });
+
+    // Prevent context menu specifically on this element
+    el.addEventListener('contextmenu', e => e.preventDefault());
   }
 
   // ── Dial: Scroll → Rotate ─────────────────────────────────────────────
 
   let wheelAccum = 0;
-  const WHEEL_THRESHOLD = 40;  // px of scroll per "tick"
+  const WHEEL_THRESHOLD = 40;
 
   dial.addEventListener('wheel', (e) => {
     e.preventDefault();
     wheelAccum += e.deltaY;
-
     while (Math.abs(wheelAccum) >= WHEEL_THRESHOLD) {
       if (wheelAccum > 0) {
-        sendKey('ArrowRight');
+        callShell({ type: 'dial', value: 'right' });
         flash(dial, 'rotating-right');
         wheelAccum -= WHEEL_THRESHOLD;
       } else {
-        sendKey('ArrowLeft');
+        callShell({ type: 'dial', value: 'left' });
         flash(dial, 'rotating-left');
         wheelAccum += WHEEL_THRESHOLD;
       }
     }
   }, { passive: false });
 
-  // ── Dial: Click → Enter ───────────────────────────────────────────────
+  // ── Dial: Click → dial_click_down ─────────────────────────────────────
 
   dial.addEventListener('click', () => {
-    sendKey('Enter');
+    callShell({ type: 'button', value: 'dial_click_down' });
     flash(dial, 'pressing', 100);
   });
 
-  // ── Back Button ───────────────────────────────────────────────────────
+  // ── Back Button: long-press aware ─────────────────────────────────────
 
-  backBtn.addEventListener('mousedown', () => {
-    sendKey('Escape');
-  });
+  bindButton(backBtn, 'back_button_down', 'back_button_up');
 
   // ── Preset Buttons ────────────────────────────────────────────────────
 
   document.querySelectorAll('.preset-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const id = btn.dataset.btn;      // e.g. 'preset_1'
-      flashPreset(btn);
-      try {
-        // Send as a postMessage using the shell's hardware input schema
-        frame.contentWindow.postMessage({
-          type: 'SIM_HARDWARE_EVENT',
-          data: { type: 'button', value: id }
-        }, location.origin);
-      } catch { /* cross-origin guard */ }
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const id = btn.dataset.btn;
+      btn.classList.add('active');
+      setTimeout(() => btn.classList.remove('active'), 150);
+      callShell({ type: 'button', value: id });
     });
   });
 
-  // ── Keyboard Shortcuts (when sim page has focus) ──────────────────────
+  // ── Control Panel Buttons ─────────────────────────────────────────────
+
+  // Dial buttons in control panel
+  document.querySelectorAll('[data-sim]').forEach(btn => {
+    const action = btn.dataset.sim;
+
+    if (action === 'back') {
+      // Long-press aware
+      bindButton(btn, 'back_button_down', 'back_button_up');
+    } else {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        btn.classList.add('active');
+        setTimeout(() => btn.classList.remove('active'), 150);
+
+        switch (action) {
+          case 'dial-left':
+            callShell({ type: 'dial', value: 'left' });
+            flash(dial, 'rotating-left');
+            break;
+          case 'dial-right':
+            callShell({ type: 'dial', value: 'right' });
+            flash(dial, 'rotating-right');
+            break;
+          case 'dial-click':
+            callShell({ type: 'button', value: 'dial_click_down' });
+            flash(dial, 'pressing', 100);
+            break;
+          case 'preset_1': case 'preset_2': case 'preset_3': case 'preset_4': case 'settings':
+            callShell({ type: 'button', value: action });
+            break;
+          case 'swipe-left':
+            callShell({ type: 'touch', value: 'swipe-left' });
+            break;
+          case 'swipe-right':
+            callShell({ type: 'touch', value: 'swipe-right' });
+            break;
+          case 'tap':
+            callShell({ type: 'touch', value: 'tap' });
+            break;
+        }
+      });
+    }
+  });
+
+  // ── Keyboard Shortcuts ────────────────────────────────────────────────
+
+  let escHeld = false;
 
   document.addEventListener('keydown', (e) => {
-    // Don't intercept if an input element is focused
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
     switch (e.key) {
       case 'ArrowLeft':
         e.preventDefault();
-        sendKey('ArrowLeft');
+        callShell({ type: 'dial', value: 'left' });
         flash(dial, 'rotating-left');
         break;
       case 'ArrowRight':
         e.preventDefault();
-        sendKey('ArrowRight');
+        callShell({ type: 'dial', value: 'right' });
         flash(dial, 'rotating-right');
         break;
       case 'ArrowUp':
         e.preventDefault();
-        sendKey('ArrowUp');
+        callShell({ type: 'dial', value: 'up' });
         flash(dial, 'rotating-left');
         break;
       case 'ArrowDown':
         e.preventDefault();
-        sendKey('ArrowDown');
+        callShell({ type: 'dial', value: 'down' });
         flash(dial, 'rotating-right');
         break;
       case 'Enter':
         e.preventDefault();
-        sendKey('Enter');
+        callShell({ type: 'button', value: 'dial_click_down' });
         flash(dial, 'pressing', 100);
         break;
       case 'Escape':
       case 'Backspace':
         e.preventDefault();
-        sendKey('Escape');
+        if (!escHeld) {
+          escHeld = true;
+          callShell({ type: 'button', value: 'back_button_down' });
+          backBtn.classList.add('held');
+        }
         break;
-      // Preset shortcuts: 1-4
       case '1': case '2': case '3': case '4': {
-        const btn = document.querySelector(`.preset-btn[data-btn="preset_${e.key}"]`);
-        if (btn) { btn.click(); }
+        const pbtn = document.querySelector(`.preset-btn[data-btn="preset_${e.key}"]`);
+        if (pbtn) pbtn.click();
         break;
       }
     }
   });
 
+  document.addEventListener('keyup', (e) => {
+    if (e.key === 'Escape' || e.key === 'Backspace') {
+      if (escHeld) {
+        escHeld = false;
+        callShell({ type: 'button', value: 'back_button_up' });
+        backBtn.classList.remove('held');
+      }
+    }
+  });
+
   // ── Wire the shell to accept SIM_HARDWARE_EVENT from the simulator ────
-  // The shell only listens to its own keydown events and postMessages from
-  // child iframes (apps).  For preset buttons we send a SIM_HARDWARE_EVENT
-  // that the shell needs to handle.  We inject a tiny listener once the
-  // iframe loads.
 
   frame.addEventListener('load', () => {
     try {
@@ -163,7 +234,6 @@
         if (e.origin !== location.origin) return;
         const d = e.data;
         if (!d || d.type !== 'SIM_HARDWARE_EVENT') return;
-        // Access the shell runtime and call handleHardwareInput directly
         if (win.shell && typeof win.shell.handleHardwareInput === 'function') {
           win.shell.handleHardwareInput(d.data);
         }
