@@ -54,24 +54,52 @@ class ADBManager {
    * This is the "Plug and Play" magic.
    */
   async setupDevice(deviceId, serverPort) {
-    const localIP = this.getLocalIP();
-    const serverURL = `http://${localIP}:${serverPort}`;
-    console.log(`Setting up device ${deviceId} to connect to ${serverURL}`);
+    console.log(`[ADB] Provisioning device ${deviceId}...`);
 
-    // Commands to point the Car Thing browser to our server
-    // Note: These exact commands may vary based on the firmware used (Superbird-Debian, etc.)
-    // For Superbird-Debian, we often update a config file or use 'am start'
-    const commands = [
-      // Example for a typical custom firmware:
-      `shell "echo '${serverURL}' > /tmp/server_url"`,
-      `shell "supervisorctl restart webapp"` // Force reload
-    ];
+    try {
+      // 1. Setup port reversal so device can hit localhost:serverPort
+      await this.setupReverse(serverPort, deviceId);
 
-    for (const cmd of commands) {
-      await this.runCommand(cmd, deviceId);
+      // 2. Remount root as RW
+      await this.runCommand('shell "mount -o remount,rw /"', deviceId);
+
+      // 3. Push the redirector to the stock app path
+      const path = require('path');
+      const redirectPath = path.join(__dirname, '..', 'redirect_v3.html');
+      await this.runCommand(`push "${redirectPath}" /usr/share/qt-superbird-app/webapp/index.html`, deviceId);
+
+      // 4. Kill the stock Spotify app to free up CPU/Memory
+      await this.runCommand('shell "supervisorctl stop superbird"', deviceId).catch(() => {});
+
+      // 5. Clear Chrome cache to prevent stale redirect or white screens
+      await this.runCommand('shell "rm -rf /var/cache/chrome_storage/*"', deviceId).catch(() => {});
+
+      // 6. Restart Chromium
+      await this.runCommand('shell "supervisorctl restart chromium"', deviceId);
+
+      console.log(`[ADB] Device ${deviceId} provisioned successfully.`);
+      return `http://127.0.0.1:${serverPort}`;
+    } catch (err) {
+      console.error(`[ADB] Provisioning failed for ${deviceId}:`, err.message);
+      throw err;
     }
+  }
 
-    return serverURL;
+  /**
+   * Sets the screen brightness.
+   * Note: On some firmwares, values are 1-255. 0 can turn off the backlight.
+   */
+  /**
+   * Sets up a reverse bridge for a port.
+   */
+  async setupReverse(port, deviceId) {
+    console.log(`[ADB] Setting up reverse bridge for port ${port} on ${deviceId}`);
+    return this.runCommand(`reverse tcp:${port} tcp:${port}`, deviceId);
+  }
+
+  async setBrightness(level, deviceId) {
+    console.log(`[ADB] Setting brightness to ${level} on ${deviceId}`);
+    return this.runCommand(`shell "echo ${level} > /sys/class/backlight/aml-bl/brightness"`, deviceId);
   }
 
   runCommand(command, deviceId) {

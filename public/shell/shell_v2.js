@@ -208,6 +208,7 @@ class ShellRuntime {
     
     // Time Sync
     this.serverTimeOffset = 0;
+    this.serverTzOffset = 0;
 
     // Focus Zone: 'statusbar' | 'grid' | 'app'
     this.focusZone = 'grid';
@@ -298,6 +299,9 @@ class ShellRuntime {
         if (msg.serverTime) {
           this.serverTimeOffset = msg.serverTime - Date.now();
         }
+        if (typeof msg.serverTzOffset !== 'undefined') {
+          this.serverTzOffset = msg.serverTzOffset;
+        }
         if (msg.apps) {
           this.apps = msg.apps;
           this.renderAppGrid();
@@ -307,6 +311,9 @@ class ShellRuntime {
       case MessageType.S2D_TIME_SYNC:
         if (msg.serverTime) {
           this.serverTimeOffset = msg.serverTime - Date.now();
+        }
+        if (typeof msg.serverTzOffset !== 'undefined') {
+          this.serverTzOffset = msg.serverTzOffset;
         }
         break;
 
@@ -823,11 +830,13 @@ class ShellRuntime {
 
   startClock() {
     const update = () => {
-      // Adjusted time based on server sync
-      const now = new Date(Date.now() + this.serverTimeOffset);
+      // Adjusted time based on server sync and server's timezone
+      // We subtract the server's TZ offset (in minutes) to shift UTC to Server Local
+      // then use getUTC methods to avoid the device's own local TZ shift.
+      const now = new Date(Date.now() + this.serverTimeOffset - (this.serverTzOffset * 60000));
       
-      let h = now.getHours();
-      const m = now.getMinutes().toString().padStart(2, '0');
+      let h = now.getUTCHours();
+      const m = now.getUTCMinutes().toString().padStart(2, '0');
       const ampm = h >= 12 ? 'PM' : 'AM';
       
       // Convert to 12h format
@@ -835,6 +844,7 @@ class ShellRuntime {
       h = h ? h : 12; 
       
       this.elements.statusTime.textContent = `${h}:${m} ${ampm}`;
+      this.elements.statusTime.style.color = ''; // Reset to default (white)
     };
     setInterval(update, 1000);
     update();

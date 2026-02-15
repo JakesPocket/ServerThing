@@ -3,6 +3,19 @@
 
 import { MessageType, InputType } from '/shared/protocol.js';
 
+// ─── Hardware Key Codes ─────────────────────────────────────────────────────
+// Linux input event key codes from the input-bridge
+const KEY_CODES = {
+  KEY_BACK: 158,
+  KEY_ENTER: 28,
+  KEY_LEFT: 105,
+  KEY_RIGHT: 106,
+  BTN_0: 256,  // Preset 1
+  BTN_1: 257,  // Preset 2
+  BTN_2: 258,  // Preset 3
+  BTN_3: 259   // Preset 4
+};
+
 // ─── Device Scaling Hook ────────────────────────────────────────────────────
 // Detects the host device class and sets the root font-size so that all rem
 // values scale proportionally.  The Car Thing has an 800×480 screen at low PPI;
@@ -29,6 +42,28 @@ function applyDeviceScale() {
 // Apply once at boot and on any resize / orientation change
 applyDeviceScale();
 window.addEventListener('resize', applyDeviceScale);
+
+// Preload Material Symbols and toggle a class once available so glyphs replace fallbacks
+function loadMaterialSymbolsFont() {
+  const CLASS_NAME = 'material-font-loaded';
+  const FACE_DECL = '400 24px "Material Symbols Outlined"';
+  const markLoaded = () => document.body.classList.add(CLASS_NAME);
+
+  try {
+    if (document.fonts && document.fonts.load) {
+      document.fonts.load(FACE_DECL).then(() => {
+        // Only enable when the browser confirms the face is present.
+        if (document.fonts.check && document.fonts.check(FACE_DECL)) {
+          markLoaded();
+        }
+      }).catch(() => {});
+    } else {
+      // Older engines: leave fallbacks in place.
+    }
+  } catch (e) {
+    // Leave fallbacks in place on failure.
+  }
+}
 
 // ─── Config Manager ─────────────────────────────────────────────────────────
 // Lightweight localStorage-backed state layer.  Single source of truth for app
@@ -208,6 +243,7 @@ class ShellRuntime {
     
     // Time Sync
     this.serverTimeOffset = 0;
+    this.serverTzOffset = 0;
 
     // Focus Zone: 'statusbar' | 'grid' | 'app'
     this.focusZone = 'grid';
@@ -257,7 +293,7 @@ class ShellRuntime {
   // ─── WebSocket ──────────────────────────────────────────────────────────
   connectWebSocket() {
     const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
-    const url = `${protocol}://${location.host}/ws/device`;
+    const url = `${protocol}://${location.host}/ws/device?id=${encodeURIComponent(this.deviceId)}`;
     console.log(`[Shell] Connecting to ${url}`);
 
     this.ws = new WebSocket(url);
@@ -298,6 +334,9 @@ class ShellRuntime {
         if (msg.serverTime) {
           this.serverTimeOffset = msg.serverTime - Date.now();
         }
+        if (typeof msg.serverTzOffset !== 'undefined') {
+          this.serverTzOffset = msg.serverTzOffset;
+        }
         if (msg.apps) {
           this.apps = msg.apps;
           this.renderAppGrid();
@@ -307,6 +346,9 @@ class ShellRuntime {
       case MessageType.S2D_TIME_SYNC:
         if (msg.serverTime) {
           this.serverTimeOffset = msg.serverTime - Date.now();
+        }
+        if (typeof msg.serverTzOffset !== 'undefined') {
+          this.serverTzOffset = msg.serverTzOffset;
         }
         break;
 
@@ -327,6 +369,11 @@ class ShellRuntime {
 
       case MessageType.S2D_APP_RESPONSE:
         this.forwardToActiveApp(msg);
+        break;
+
+      case MessageType.S2D_INPUT:
+        // Hardware input from input-bridge
+        this.handleHardwareKeyCode(msg.keyCode, msg.isPressed);
         break;
 
       case MessageType.S2D_INPUT_RECEIVED:
@@ -353,6 +400,68 @@ class ShellRuntime {
         type: 'server-message',
         message: msg
       }, '*');
+    }
+  }
+
+  handleHardwareKeyCode(keyCode, isPressed) {
+    // Convert Linux key codes from input-bridge to shell input format
+    let input = null;
+
+    switch (keyCode) {
+      case KEY_CODES.KEY_LEFT:
+        if (isPressed) {
+          input = { type: InputType.DIAL, value: 'left' };
+        }
+        break;
+
+      case KEY_CODES.KEY_RIGHT:
+        if (isPressed) {
+          input = { type: InputType.DIAL, value: 'right' };
+        }
+        break;
+
+      case KEY_CODES.KEY_ENTER:
+        input = { 
+          type: InputType.BUTTON, 
+          value: isPressed ? 'dial_click_down' : 'dial_click_up' 
+        };
+        break;
+
+      case KEY_CODES.KEY_BACK:
+        input = { 
+          type: InputType.BUTTON, 
+          value: isPressed ? 'back_button_down' : 'back_button_up' 
+        };
+        break;
+
+      case KEY_CODES.BTN_0:
+        if (isPressed) {
+          input = { type: InputType.BUTTON, value: 'preset_1' };
+        }
+        break;
+
+      case KEY_CODES.BTN_1:
+        if (isPressed) {
+          input = { type: InputType.BUTTON, value: 'preset_2' };
+        }
+        break;
+
+      case KEY_CODES.BTN_2:
+        if (isPressed) {
+          input = { type: InputType.BUTTON, value: 'preset_3' };
+        }
+        break;
+
+      case KEY_CODES.BTN_3:
+        if (isPressed) {
+          input = { type: InputType.BUTTON, value: 'preset_4' };
+        }
+        break;
+    }
+
+    if (input) {
+      console.log('[Shell] Hardware input:', input);
+      this.handleHardwareInput(input);
     }
   }
 
@@ -720,7 +829,11 @@ class ShellRuntime {
 
     // Sort apps according to ConfigManager's persisted order
     const orderedIds  = this.configManager.syncOrder(enabledIds);
-    const appMap      = Object.fromEntries(enabledApps.map(a => [a.id, a]));
+    // Build map manually (Object.fromEntries is ES2019, too new for Chromium 69)
+    const appMap = {};
+    enabledApps.forEach(app => {
+      appMap[app.id] = app;
+    });
     const sortedApps  = orderedIds.map(id => appMap[id]).filter(Boolean);
 
     // Clamp focus index to avoid out-of-bounds on refresh (e.g. if an app was removed)
@@ -823,11 +936,13 @@ class ShellRuntime {
 
   startClock() {
     const update = () => {
-      // Adjusted time based on server sync
-      const now = new Date(Date.now() + this.serverTimeOffset);
+      // Adjusted time based on server sync and server's timezone
+      // We subtract the server's TZ offset (in minutes) to shift UTC to Server Local
+      // then use getUTC methods to avoid the device's own local TZ shift.
+      const now = new Date(Date.now() + this.serverTimeOffset - (this.serverTzOffset * 60000));
       
-      let h = now.getHours();
-      const m = now.getMinutes().toString().padStart(2, '0');
+      let h = now.getUTCHours();
+      const m = now.getUTCMinutes().toString().padStart(2, '0');
       const ampm = h >= 12 ? 'PM' : 'AM';
       
       // Convert to 12h format
@@ -835,6 +950,7 @@ class ShellRuntime {
       h = h ? h : 12; 
       
       this.elements.statusTime.textContent = `${h}:${m} ${ampm}`;
+      this.elements.statusTime.style.color = ''; // Reset to default (white)
     };
     setInterval(update, 1000);
     update();
@@ -868,7 +984,10 @@ class ShellRuntime {
   }
 }
 
-document.addEventListener('DOMContentLoaded', () => { window.shell = new ShellRuntime(); });
+document.addEventListener('DOMContentLoaded', () => {
+  loadMaterialSymbolsFont();
+  window.shell = new ShellRuntime();
+});
 
 // ─── Heap Monitor (DevTools diagnostic) ─────────────────────────────────────
 // Paste into console or enable with: shell.startHeapMonitor()

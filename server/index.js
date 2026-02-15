@@ -15,6 +15,9 @@ const APPS_DIR = path.join(__dirname, 'apps');
 // Multer setup for file uploads in memory
 const upload = multer({ storage: multer.memoryStorage() });
 
+const app = express();
+const server = http.createServer(app);
+
 /**
  * Manages reading and writing state to the filesystem.
  */
@@ -213,6 +216,7 @@ class AppManager {
             // If the app has an init method, run it with context
             if (typeof appInstance.init === 'function') {
               const context = {
+                app: app, // Provide express app for routing
                 onInput: (handler) => {
                   const appEntry = this.apps.get(entry.name);
                   if (appEntry) appEntry.inputHandler = handler.bind(appInstance);
@@ -306,8 +310,6 @@ const persistenceManager = new PersistenceManager(DATA_DIR);
 const deviceManager = new DeviceStateManager(persistenceManager);
 const appManager = new AppManager(persistenceManager);
 
-// Express app
-const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
@@ -327,11 +329,37 @@ function mountAppUIs(expressApp, appManager) {
 }
 mountAppUIs(app, appManager);
 
+// ── ADB Auto-Provisioning ───────────────────────────────────────────────────
+/**
+ * Periodically checks for new ADB devices and sets up port bridges automatically.
+ */
+function startADBPooling() {
+  const provisionedDevices = new Set();
+  setInterval(async () => {
+    try {
+      const devices = await adbManager.listDevices();
+      
+      // Clean up disconnected devices from our session set
+      for (const id of provisionedDevices) {
+        if (!devices.includes(id)) provisionedDevices.delete(id);
+      }
+
+      for (const deviceId of devices) {
+        if (!provisionedDevices.has(deviceId)) {
+          console.log(`[ADB] New device detected: ${deviceId}. Provisioning bridge...`);
+          await adbManager.setupReverse(PORT, deviceId);
+          provisionedDevices.add(deviceId);
+        }
+      }
+    } catch (err) {
+      // ADB might be busy or restarting, ignore
+    }
+  }, 5000); // 5-second poll
+}
+startADBPooling();
+
 // Serve shared folder for frontend modules
 app.use('/shared', express.static(path.join(__dirname, '..', 'shared')));
-
-// HTTP server
-const server = http.createServer(app);
 
 // WebSocket server for devices
 const wssDevice = new WebSocketServer({ noServer: true });
@@ -432,7 +460,9 @@ wssDevice.on('connection', (ws, request) => {
     const initialMessage = {
       type: MessageType.S2D_CONNECTED,
       deviceId,
-      apps: appManager.getApps()
+      apps: appManager.getApps(),
+      serverTime: Date.now(),
+      serverTzOffset: new Date().getTimezoneOffset()
     };
     console.log(`[Device] Sending initial state to ${deviceId}:`, JSON.stringify(initialMessage));
     ws.send(JSON.stringify(initialMessage));
@@ -442,14 +472,52 @@ wssDevice.on('connection', (ws, request) => {
         const message = JSON.parse(data.toString());
         console.log(`[Device] Message from ${deviceId}:`, message.type);
         
+        // ── Hardware Input Bridge ───────────────────────────────────────────
+        // If this is the input-bridge, forward raw input to shell devices
+        if (deviceId === 'input-bridge' && message.type === 'input') {
+          console.log(`[Input Bridge] Forwarding input to shell devices:`, message);
+          deviceConnections.forEach((deviceWs, devId) => {
+            if (devId.startsWith('shell-') && deviceWs.readyState === 1) { // 1 = OPEN
+              deviceWs.send(JSON.stringify({
+                type: MessageType.S2D_INPUT,
+                keyCode: message.keyCode,
+                isPressed: message.isPressed
+              }));
+            }
+          });
+          return;
+        }
+        
         if (message.type === MessageType.D2S_INPUT) {
+          const input = message.input || message.data; // Backward compatibility
+
+          // ── System Hook: Hardware Controls ────────────────────────────────
+          if (input.type === 'SYS_COMMAND') {
+            const { command, value } = input;
+            console.log(`[Device] ${deviceId} requested system command: ${command}=${value}`);
+            
+            if (command === 'brightness') {
+              // Map deviceId (which might be our custom ID) to actual ADB ID if possible
+              // For now, we'll try to apply it to all connected ADB devices as a broadcast
+              // or find one that matches.
+              adbManager.listDevices().then(adbDevices => {
+                for (const adbId of adbDevices) {
+                  adbManager.setBrightness(value, adbId).catch(err => {
+                    console.error(`[ADB] Failed to set brightness on ${adbId}:`, err.message);
+                  });
+                }
+              });
+            }
+            return; // Don't forward system commands to apps
+          }
+
           // Store input event
-          deviceManager.addInput(deviceId, message.data);
+          deviceManager.addInput(deviceId, input);
           
           // Broadcast to all enabled apps
           const apps = appManager.getApps().filter(app => app.enabled);
           for (const app of apps) {
-            const response = appManager.handleInput(app.id, deviceId, message.data);
+            const response = appManager.handleInput(app.id, deviceId, input);
             if (response) {
               ws.send(JSON.stringify({
                 type: MessageType.S2D_APP_RESPONSE,
@@ -495,12 +563,45 @@ app.get('/api/apps', (req, res) => {
   res.json(appManager.getApps());
 });
 
+app.post('/api/input', (req, res) => {
+  // Hardware input from input-bridge Python script
+  const { deviceId, keyCode, isPressed } = req.body;
+  
+  if (!deviceId || keyCode === undefined || isPressed === undefined) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+  
+  console.log(`[Input Bridge] Received input: keyCode=${keyCode}, isPressed=${isPressed}`);
+  
+  // Broadcast to all shell devices
+  deviceConnections.forEach((ws, devId) => {
+    if (devId.startsWith('shell-') && ws.readyState === 1) { // 1 = OPEN
+      ws.send(JSON.stringify({
+        type: MessageType.S2D_INPUT,
+        keyCode,
+        isPressed
+      }));
+    }
+  });
+  
+  res.json({ success: true });
+});
+
 app.post('/api/apps/reload', (req, res) => {
   appManager.reloadApps();
   broadcastUI({ type: MessageType.S2U_APPS_CHANGED });
   broadcastDevices({ type: MessageType.S2D_APPS_RELOADED, apps: appManager.getApps() });
   res.json({ success: true, message: 'Apps reloaded' });
 });
+
+// Periodic Time Sync to devices
+setInterval(() => {
+  broadcastDevices({
+    type: MessageType.S2D_TIME_SYNC,
+    serverTime: Date.now(),
+    serverTzOffset: new Date().getTimezoneOffset()
+  });
+}, 60000); // Every minute
 
 app.post('/api/apps/:appId/enable', (req, res) => {
   const { appId } = req.params;

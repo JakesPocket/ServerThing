@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ServerThing</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            background: #0a0a0a; 
+            color: #e0e0e0; 
+            display: flex; 
+            flex-direction: column;
+            align-items: center; 
+            justify-content: center; 
+            height: 100vh; 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            overflow: hidden;
+        }
+        
+        .splash-container {
+            text-align: center;
+            animation: fadeIn 0.5s ease-out;
+        }
+        
+        /* Custom ServerThing Logo - Spinning Gear */
+        .logo-svg {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 20px;
+        }
+        
+        .gear-outer {
+            transform-origin: center;
+            animation: spin 3s linear infinite;
+        }
+        
+        .gear-inner {
+            transform-origin: center;
+            animation: spin-reverse 2s linear infinite;
+        }
+        
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        
+        @keyframes spin-reverse {
+            from { transform: rotate(360deg); }
+            to { transform: rotate(0deg); }
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .app-name {
+            font-size: 24px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+            color: #fff;
+        }
+        
+        .status {
+            font-size: 14px;
+            color: #888;
+            margin-top: 8px;
+        }
+        
+        .version {
+            position: absolute;
+            bottom: 20px;
+            font-size: 10px;
+            color: #333;
+            letter-spacing: 1px;
+        }
+        
+        .dot-pulse {
+            display: inline-block;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+    </style>
+</head>
+<body>
+    <div class="splash-container">
+        <!-- Custom ServerThing Logo -->
+        <svg class="logo-svg" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+            <!-- Outer Gear (spins clockwise) -->
+            <g class="gear-outer" fill="none" stroke="#4a9eff" stroke-width="3">
+                <circle cx="50" cy="50" r="30"/>
+                <path d="M50,10 L50,5 M90,50 L95,50 M50,90 L50,95 M10,50 L5,50 
+                         M73,73 L77,77 M27,27 L23,23 M73,27 L77,23 M27,73 L23,77"/>
+            </g>
+            
+            <!-- Inner Gear (spins counter-clockwise) -->
+            <g class="gear-inner" fill="none" stroke="#6bb6ff" stroke-width="2">
+                <circle cx="50" cy="50" r="18"/>
+                <path d="M50,25 L50,22 M75,50 L78,50 M50,75 L50,78 M25,50 L22,50"/>
+            </g>
+            
+            <!-- Center Circle -->
+            <circle cx="50" cy="50" r="8" fill="#4a9eff"/>
+        </svg>
+        
+        <div class="app-name">ServerThing</div>
+        <div class="status" id="status">Connecting<span class="dot-pulse">...</span></div>
+    </div>
+    
+    <div class="version">v1.0.1-syncFix</div>
+    
+    <script>
+        console.log("ServerThing splash screen loaded");
+        
+        const updateStatus = (msg) => {
+            document.getElementById('status').innerHTML = msg + '<span class="dot-pulse">...</span>';
+        };
+        
+        // Simulate connection sequence
+        setTimeout(() => updateStatus('Establishing tunnel'), 500);
+        setTimeout(() => updateStatus('Loading shell'), 1000);
+        setTimeout(() => {
+            const target = 'http://127.0.0.1:3000/shell/index.html?t=' + Date.now();
+            window.location.replace(target);
+        }, 1500);
+    </script>
+</body>
+</html>

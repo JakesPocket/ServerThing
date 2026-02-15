@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Generate Boot Splash</title>
+    <style>
+        body { margin: 0; padding: 20px; background: #1a1a1a; color: white; font-family: sans-serif; }
+        #canvas { border: 2px solid #333; margin: 20px 0; }
+        button { padding: 10px 20px; background: #4a9eff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        button:hover { background: #3a8eef; }
+    </style>
+</head>
+<body>
+    <h2>ServerThing Boot Splash Generator</h2>
+    <p>Car Thing display: 800x480 (landscape)</p>
+    <canvas id="canvas" width="800" height="480"></canvas>
+    <br>
+    <button onclick="downloadImage()">Download appstart.png</button>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        // Background
+        ctx.fillStyle = '#0a0a0a';
+        ctx.fillRect(0, 0, 800, 480);
+
+        // Draw gear-based logo in center
+        ctx.save();
+        ctx.translate(400, 220);
+
+        // Outer gear circle
+        ctx.strokeStyle = '#4a9eff';
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.arc(0, 0, 80, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Gear teeth (8 directions)
+        for (let i = 0; i < 8; i++) {
+            const angle = (Math.PI / 4) * i;
+            const x1 = Math.cos(angle) * 80;
+            const y1 = Math.sin(angle) * 80;
+            const x2 = Math.cos(angle) * 100;
+            const y2 = Math.sin(angle) * 100;
+            
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+        }
+
+        // Inner gear circle
+        ctx.strokeStyle = '#6bb6ff';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(0, 0, 50, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Inner teeth (4 directions)
+        for (let i = 0; i < 4; i++) {
+            const angle = (Math.PI / 2) * i;
+            const x1 = Math.cos(angle) * 50;
+            const y1 = Math.sin(angle) * 50;
+            const x2 = Math.cos(angle) * 65;
+            const y2 = Math.sin(angle) * 65;
+            
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+        }
+
+        // Center circle
+        ctx.fillStyle = '#4a9eff';
+        ctx.beginPath();
+        ctx.arc(0, 0, 20, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+
+        // App name
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 48px -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('ServerThing', 400, 340);
+
+        // Version
+        ctx.fillStyle = '#666';
+        ctx.font = '16px monospace';
+        ctx.fillText('v1.0.1-syncFix', 400, 430);
+
+        function downloadImage() {
+            canvas.toBlob(function(blob) {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'appstart.png';
+                a.click();
+                URL.revokeObjectURL(url);
+            });
+        }
+    </script>
+</body>
+</html>

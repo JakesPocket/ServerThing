@@ -83,7 +83,8 @@ class MakeMkvApp {
       }
       this.updateFocus();
     } else if (type === 'BUTTON' && value === 'DIAL_CLICK_DOWN') {
-      focusable[this.focusedIndex]?.click();
+      const target = focusable[this.focusedIndex];
+      if (target) target.click();
     }
   }
 

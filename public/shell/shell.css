@@ -13,8 +13,8 @@ html {
   --status-bar-height: 2.5rem;       /* 40px @ 16px base */
   --grid-columns: 4;
   --grid-rows: 3;
-  --grid-gap: clamp(0.5rem, 2vw, 1.25rem);
-  --grid-pad: clamp(0.75rem, 3vw, 1.5rem);
+  --grid-gap: 0.75rem;
+  --grid-pad: 1rem;
 
   /* Accent / brand */
   --accent: #007aff;
@@ -22,9 +22,9 @@ html {
   --muted-opacity: 0.5;
 
   /* Icon tile */
-  --icon-tile-size:   clamp(3rem, 10vw, 5rem);
+  --icon-tile-size:   4rem;
   --icon-tile-radius: 1.125rem;
-  --icon-glyph-size:  clamp(1.75rem, 6vw, 3rem);
+  --icon-glyph-size:  2.5rem;
   --icon-default-bg:  #2d2d2d;
   --icon-default-fg:  #ffffff;
 
@@ -47,7 +47,7 @@ html {
   --status-nav-dim: 0.35;
 
   /* Label */
-  --label-size: clamp(0.625rem, 2vw, 0.875rem);
+  --label-size: 0.75rem;
 
   /* ─── UI Bridge Tokens (injected into iframes) ──────────────────────── */
   --st-highlight-bg:     #ffffff;
@@ -121,7 +121,8 @@ html, body {
   height: 100%;
 }
 
-#sys-nav-button {
+#sys-nav-button,
+#sys-settings-button {
   background: none;
   border: none;
   color: var(--status-fg);
@@ -136,11 +137,19 @@ html, body {
   justify-content: center;
   border-radius: 0.375rem;
   transition: background 0.15s ease, opacity 0.2s ease;
+  outline: none;
 }
 
-#sys-nav-button .material-symbols-outlined {
+#sys-nav-button .material-symbols-outlined,
+#sys-settings-button .material-symbols-outlined {
   font-size: 1.375rem;
   line-height: 1;
+}
+
+#sys-nav-button.focused,
+#sys-settings-button.focused {
+  background: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 0 0 calc(var(--focus-ring-width) / 2) var(--accent);
 }
 
 #sys-nav-button.at-root {
@@ -160,7 +169,7 @@ html, body {
 #status-connection {
   color: #555;
   font-size: 0.75rem;
-  min-width: 3.75rem;
+  min-width: 0.75rem;
   text-align: right;
   display: inline-flex;
   align-items: center;
@@ -236,6 +245,7 @@ html, body {
 /* ─── Icon Wrapper (the "squircle") ────────────────────────────────────────── */
 .icon-wrapper {
   width: var(--icon-tile-size);
+  height: var(--icon-tile-size);
   aspect-ratio: 1 / 1;
   border-radius: var(--icon-tile-radius);
   display: flex;
@@ -248,18 +258,37 @@ html, body {
               font-variation-settings 0.15s ease;
   /* Compositor layer promotion for smooth focus transitions */
   will-change: border-color, opacity;
+  position: relative;
+  overflow: hidden;
+}
+
+.fallback-icon {
+  font-size: calc(var(--icon-tile-size) * 0.55);
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  z-index: 2;
+  position: relative;
+  color: inherit;
+}
+
+.icon-wrapper .material-symbols-outlined {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: var(--icon-glyph-size);
+  line-height: 1;
+  font-family: 'Material Symbols Outlined', sans-serif;
   /* Variable font — default axes */
   font-variation-settings:
     'wght' var(--sym-weight),
     'GRAD' var(--sym-grade),
     'opsz' var(--sym-opsz);
-}
-
-.icon-wrapper .material-symbols-outlined {
-  font-size: var(--icon-glyph-size);
-  line-height: 1;
-  /* Inherit variable axes from parent */
-  font-variation-settings: inherit;
+  /* Hidden until the font is confirmed loaded */
+  display: none;
+  visibility: hidden;
 }
 
 /* ─── Label ────────────────────────────────────────────────────────────────── */
@@ -328,12 +357,47 @@ html, body {
 
 /* ─── Material Symbols — Prevent FOIT ──────────────────────────────────────── */
 .material-symbols-outlined {
+  font-family: 'Material Symbols Outlined', sans-serif;
   font-display: swap;
+  visibility: hidden; /* Hide keywords if font fails to load */
+}
+
+/* When the font is available, swap from the fallback initial to the glyph */
+body.material-font-loaded .icon-wrapper .material-symbols-outlined {
+  display: block;
+  visibility: visible;
+}
+
+body.material-font-loaded .fallback-icon {
+  display: none;
+}
+
+body.material-font-loaded .material-symbols-outlined {
+  visibility: visible;
+}
+
+/* Defensive: never show ligature text if the font fails to load */
+body:not(.material-font-loaded) .material-symbols-outlined {
+  display: none;
+  visibility: hidden;
+}
+
+.shell-icon {
+  width: 1.5rem;
+  height: 1.5rem;
+  fill: currentColor;
+  flex-shrink: 0;
+  display: block;
+}
+
+.shell-icon.sm {
+  width: 1.125rem;
+  height: 1.125rem;
 }
 
 /* ─── Hint text ────────────────────────────────────────────────────────────── */
 .hint {
-  font-size: clamp(0.625rem, 1.5vw, 0.8125rem);
+  font-size: 0.75rem;
   color: rgba(255, 255, 255, 0.35);
   margin-top: 0.5rem;
 }
@@ -387,3 +451,93 @@ html, body {
 
 @keyframes spin { to { transform: rotate(360deg); } }
 .hidden { display: none !important; }
+
+/* ─── Settings Overlay ─────────────────────────────────────────────────── */
+#settings-overlay {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(0, 0, 0, 0.85);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(0.625rem);
+  -webkit-backdrop-filter: blur(0.625rem);
+}
+
+#settings-overlay.hidden {
+  display: none !important;
+}
+
+.settings-panel {
+  background: #1a1a1a;
+  width: 25rem;
+  max-width: 90%;
+  border-radius: 1.25rem;
+  padding: 1.5rem;
+  border: 0.0625rem solid #333;
+  box-shadow: 0 0.625rem 2.5rem rgba(0, 0, 0, 0.5);
+}
+
+.settings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.settings-header h3 {
+  font-weight: 600;
+  font-size: 1.125rem;
+}
+
+.close-btn {
+  background: #333;
+  border: none;
+  color: #fff;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.close-btn:active {
+  background: #444;
+}
+
+#settings-overlay:not(.hidden) ~ #app-viewport {
+  filter: grayscale(0.2) brightness(0.5);
+}
+
+.setting-item {
+  margin-bottom: 1.5rem;
+}
+
+.setting-item label {
+  display: block;
+  font-size: 0.875rem;
+  color: #888;
+  margin-bottom: 0.5rem;
+}
+
+.slider-container {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+#brightness-slider {
+  flex: 1;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.toggle-container {
+  display: flex;
+  justify-content: flex-end;
+}

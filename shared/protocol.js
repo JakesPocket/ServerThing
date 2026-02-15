@@ -8,6 +8,7 @@ const MessageType = {
   S2D_APPS_RELOADED: 'apps-reloaded',
   S2D_APP_RESPONSE: 'app-response',
   S2D_INPUT_RECEIVED: 'input-received',
+  S2D_TIME_SYNC: 'time-sync',
 
   // Device to Server
   D2S_INPUT: 'input',
