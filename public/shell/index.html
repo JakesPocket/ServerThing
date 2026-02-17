@@ -25,7 +25,6 @@
         <button id="sys-settings-button" class="status-icon-button" aria-label="Settings">
           <span class="material-symbols-outlined">settings</span>
         </button>
-        <span id="status-connection">●</span>
       </div>
     </div>
 
@@ -89,8 +88,11 @@
               <input type="checkbox" id="mic-toggle">
             </div>
           </div>
-          <div class="setting-item diagnostics">
-            <label>Input Bridge Health</label>
+          <div class="setting-item diagnostics collapsed" id="diagnostics-section">
+            <button id="diagnostics-toggle" class="diagnostics-toggle" type="button" aria-expanded="false">
+              <span>Input Bridge Health</span>
+              <span class="diag-caret" aria-hidden="true">▸</span>
+            </button>
             <div class="diagnostics-grid">
               <div class="diag-row"><span>Server Link</span><span id="diag-server-link">--</span></div>
               <div class="diag-row"><span>Queue</span><span id="diag-queue-size">--</span></div>
@@ -102,10 +104,6 @@
         </div>
 
         <div class="settings-actions">
-          <button id="repair-clientthing" class="settings-action-btn" type="button">
-            <span class="material-symbols-outlined">build</span>
-            <span>Repair ClientThing</span>
-          </button>
           <button id="restart-chromium" class="settings-action-btn" type="button">
             <span class="material-symbols-outlined">refresh</span>
             <span>Restart Chromium</span>

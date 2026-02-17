@@ -294,7 +294,6 @@ class ShellRuntime {
       sysSettingsButton: document.getElementById('sys-settings-button'),
       navIcon: document.getElementById('nav-icon'),
       statusTime: document.getElementById('status-time'),
-      statusConnection: document.getElementById('status-connection'),
       homeScreen: document.getElementById('home-screen'),
       appGrid: document.getElementById('app-grid'),
       appContainer: document.getElementById('app-container'),
@@ -306,7 +305,8 @@ class ShellRuntime {
       brightnessValue: document.getElementById('brightness-value'),
       autoDimToggle: document.getElementById('auto-dim-toggle'),
       micToggle: document.getElementById('mic-toggle'),
-      repairClientThingBtn: document.getElementById('repair-clientthing'),
+      diagnosticsSection: document.getElementById('diagnostics-section'),
+      diagnosticsToggle: document.getElementById('diagnostics-toggle'),
       restartChromiumBtn: document.getElementById('restart-chromium'),
       rebootDeviceBtn: document.getElementById('reboot-device'),
       diagServerLink: document.getElementById('diag-server-link'),
@@ -391,7 +391,7 @@ class ShellRuntime {
   }
 
   updateConnectionStatus(connected) {
-    this.elements.statusConnection.classList.toggle('connected', connected);
+    // Connection state is reflected by the full-screen disconnect overlay.
   }
 
   showDisconnectScreen(show) {
@@ -643,10 +643,11 @@ class ShellRuntime {
       });
     }
 
-    if (this.elements.repairClientThingBtn) {
-      this.elements.repairClientThingBtn.addEventListener('pointerdown', (e) => {
+    if (this.elements.diagnosticsToggle && this.elements.diagnosticsSection) {
+      this.elements.diagnosticsToggle.addEventListener('pointerdown', (e) => {
         e.stopPropagation();
-        this.sendHardwareCommand('repair_clientthing', '1');
+        const isCollapsed = this.elements.diagnosticsSection.classList.toggle('collapsed');
+        this.elements.diagnosticsToggle.setAttribute('aria-expanded', String(!isCollapsed));
       });
     }
 
@@ -885,6 +886,13 @@ class ShellRuntime {
   }
 
   handleBackButtonDown() {
+    // If settings are open, reserve back for closing the overlay.
+    if (this.elements.settingsOverlay && !this.elements.settingsOverlay.classList.contains('hidden')) {
+      this.isLongPress = false;
+      clearTimeout(this.backButtonTimer);
+      return;
+    }
+
     this.isLongPress = false;
     clearTimeout(this.backButtonTimer);
     
@@ -898,6 +906,14 @@ class ShellRuntime {
   }
 
   handleBackButtonUp() {
+    // Close settings first on back button release.
+    if (this.elements.settingsOverlay && !this.elements.settingsOverlay.classList.contains('hidden')) {
+      clearTimeout(this.backButtonTimer);
+      this.toggleSettings(false);
+      this.isLongPress = false;
+      return;
+    }
+
     clearTimeout(this.backButtonTimer);
     
     // If it wasn't a long press, do the normal back action
@@ -952,6 +968,7 @@ class ShellRuntime {
     this.elements.appContainer.innerHTML = '';
     this.elements.appContainer.appendChild(iframe);
     this.currentApp = { id: appId, iframe, atRoot: true };
+    document.body.classList.add('app-open');
     
     this.elements.homeScreen.classList.remove('active');
     this.elements.appContainer.classList.add('active');
@@ -1016,6 +1033,7 @@ class ShellRuntime {
   returnToHomeGrid() {
     this._teardownCurrentApp();
     this.currentApp = { id: null, iframe: null, atRoot: true };
+    document.body.classList.remove('app-open');
     this.elements.appContainer.classList.remove('active');
     this.elements.homeScreen.classList.add('active');
     

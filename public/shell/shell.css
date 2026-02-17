@@ -112,6 +112,11 @@ html, body {
   z-index: 1000;
 }
 
+/* Hide status bar while an app is open for full-screen app mode. */
+body.app-open #status-bar {
+  display: none;
+}
+
 .status-bar-center { text-align: center; }
 .status-bar-right  {
   text-align: right;
@@ -169,20 +174,6 @@ html, body {
   font-weight: 500;
   font-size: 1.125rem;
 }
-
-#status-connection {
-  color: #555;
-  font-size: 0.75rem;
-  min-width: 0.75rem;
-  text-align: right;
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  height: 100%;
-  line-height: 1;
-}
-
-#status-connection.connected { color: #0f0; }
 
 /* ─── App Viewport ─────────────────────────────────────────────────────────── */
 #app-viewport {
@@ -576,24 +567,35 @@ body:not(.material-font-loaded) .material-symbols-outlined {
 
 .settings-panel {
   background: #1a1a1a;
-  width: 32rem;
-  max-width: 90%;
+  width: min(34rem, 92vw);
+  max-height: calc(100vh - 1.5rem);
   border-radius: 1.25rem;
-  padding: 2rem;
+  padding: 1.25rem 1.25rem 1rem;
   border: 0.0625rem solid #333;
   box-shadow: 0 0.625rem 2.5rem rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .settings-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1.5rem;
+  margin-bottom: 0.85rem;
+  flex-shrink: 0;
 }
 
 .settings-header h3 {
   font-weight: 600;
-  font-size: 1.5rem;
+  font-size: 1.35rem;
+}
+
+.settings-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 0.35rem;
 }
 
 .close-btn {
@@ -619,7 +621,7 @@ body:not(.material-font-loaded) .material-symbols-outlined {
 }
 
 .setting-item {
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
 }
 
 .setting-item label {
@@ -687,6 +689,30 @@ body:not(.material-font-loaded) .material-symbols-outlined {
   margin-top: 0.25rem;
 }
 
+.diagnostics-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 0.0625rem solid #2f2f2f;
+  color: #c6cfdb;
+  border-radius: 0.625rem;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.diag-caret {
+  transition: transform 0.15s ease;
+}
+
+.setting-item.diagnostics:not(.collapsed) .diag-caret {
+  transform: rotate(90deg);
+}
+
 .diagnostics-grid {
   display: grid;
   gap: 0.35rem;
@@ -694,6 +720,11 @@ body:not(.material-font-loaded) .material-symbols-outlined {
   border: 0.0625rem solid #2f2f2f;
   border-radius: 0.625rem;
   padding: 0.65rem 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.setting-item.diagnostics.collapsed .diagnostics-grid {
+  display: none;
 }
 
 .diag-row {
@@ -714,9 +745,10 @@ body:not(.material-font-loaded) .material-symbols-outlined {
   display: grid;
   grid-template-columns: 1fr;
   gap: 0.75rem;
-  margin-top: 1.25rem;
-  padding-top: 1.25rem;
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
   border-top: 0.0625rem solid #2a2a2a;
+  flex-shrink: 0;
 }
 
 .settings-action-btn {
