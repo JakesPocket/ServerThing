@@ -14,7 +14,13 @@
     </header>
 
     <section class="panel">
-      <h2>Connected Devices</h2>
+      <div class="panel-header">
+        <h2>Connected Devices</h2>
+        <div class="panel-actions">
+          <button id="provision-devices" class="btn">Provision</button>
+          <button id="clear-devices" class="btn btn-secondary">Cleanup</button>
+        </div>
+      </div>
       <div id="devices">
         <p class="loading">Loading devices...</p>
       </div>

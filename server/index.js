@@ -9,6 +9,10 @@ const AdmZip = require('adm-zip');
 const adbManager = require('./adb-manager');
 
 const PORT = process.env.PORT || 3000;
+const AUTO_PROVISION = String(process.env.ST_AUTO_PROVISION || '').toLowerCase() === '1'
+  || String(process.env.ST_AUTO_PROVISION || '').toLowerCase() === 'true';
+// Latest heartbeat from on-device input bridge (for diagnostics UI).
+let latestInputBridgeHealth = null;
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const APPS_DIR = path.join(__dirname, 'apps');
 
@@ -17,6 +21,51 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 const app = express();
 const server = http.createServer(app);
+
+function detectBrowser(userAgent = '') {
+  const ua = String(userAgent).toLowerCase();
+  if (!ua) return 'Unknown';
+  if (ua.includes('edg/')) return 'Edge';
+  if (ua.includes('opr/') || ua.includes('opera')) return 'Opera';
+  if (ua.includes('firefox/') || ua.includes('fxios')) return 'Firefox';
+  if (ua.includes('crios') || ua.includes('chrome/') || ua.includes('chromium')) return 'Chrome';
+  if (ua.includes('safari/')) return 'Safari';
+  return 'Unknown';
+}
+
+function detectPlatform(userAgent = '') {
+  const ua = String(userAgent).toLowerCase();
+  if (ua.includes('iphone') || ua.includes('ipad') || ua.includes('ipod')) return 'iOS';
+  if (ua.includes('android')) return 'Android';
+  if (ua.includes('windows')) return 'Windows';
+  if (ua.includes('mac os x') || ua.includes('macintosh')) return 'macOS';
+  if (ua.includes('linux')) return 'Linux';
+  return 'Unknown';
+}
+
+function detectDeviceClass(userAgent = '') {
+  const ua = String(userAgent).toLowerCase();
+  if (ua.includes('ipad') || ua.includes('tablet')) return 'tablet';
+  if (ua.includes('iphone') || ua.includes('ipod') || ua.includes('android') || ua.includes('mobile') || ua.includes('windows phone')) {
+    return 'mobile';
+  }
+  return 'desktop';
+}
+
+function parseClientInfo(request) {
+  const userAgent = request.headers['user-agent'] || '';
+  const xfwd = request.headers['x-forwarded-for'];
+  const ip = Array.isArray(xfwd)
+    ? xfwd[0]
+    : (typeof xfwd === 'string' && xfwd.length > 0 ? xfwd.split(',')[0].trim() : request.socket.remoteAddress);
+  return {
+    userAgent,
+    browser: detectBrowser(userAgent),
+    platform: detectPlatform(userAgent),
+    deviceClass: detectDeviceClass(userAgent),
+    ip: ip || 'unknown',
+  };
+}
 
 /**
  * Manages reading and writing state to the filesystem.
@@ -134,6 +183,37 @@ class DeviceStateManager {
     this.devices.delete(deviceId);
     this.saveState();
   }
+
+  clearDisconnected() {
+    let removed = 0;
+    for (const [deviceId, state] of this.devices.entries()) {
+      if (!state.connected) {
+        this.devices.delete(deviceId);
+        removed += 1;
+      }
+    }
+    this.saveState();
+    return removed;
+  }
+
+  clearAll() {
+    const removed = this.devices.size;
+    this.devices.clear();
+    this.saveState();
+    return removed;
+  }
+
+  pruneToActive(activeIds) {
+    let removed = 0;
+    for (const deviceId of this.devices.keys()) {
+      if (!activeIds.has(deviceId)) {
+        this.devices.delete(deviceId);
+        removed += 1;
+      }
+    }
+    this.saveState();
+    return removed;
+  }
 }
 
 /**
@@ -198,6 +278,7 @@ class AppManager {
           try {
             // Clear require cache to allow hot reload on server restart
             delete require.cache[require.resolve(appPath)];
+            console.log(`[AppManager] Loading app: ${entry.name}`); // Logging which app is loading
             const appInstance = require(appPath);
             
             this.apps.set(entry.name, {
@@ -215,6 +296,7 @@ class AppManager {
 
             // If the app has an init method, run it with context
             if (typeof appInstance.init === 'function') {
+              console.log(`[AppManager] Found init function for ${entry.name}. Calling it.`); // Logging the call
               const context = {
                 app: app, // Provide express app for routing
                 onInput: (handler) => {
@@ -331,32 +413,108 @@ mountAppUIs(app, appManager);
 
 // ── ADB Auto-Provisioning ───────────────────────────────────────────────────
 /**
- * Periodically checks for new ADB devices and sets up port bridges automatically.
+ * Periodically checks for new ADB devices and fully provisions them.
+ * Retries provisioning while devices are still booting.
  */
 function startADBPooling() {
   const provisionedDevices = new Set();
+  const provisioningDevices = new Set();
+  const nextProvisionAttemptAt = new Map();
+  const nextMaintenanceAt = new Map();
+  const READ_ONLY_RETRY_MS = 60000;
+  const NORMAL_RETRY_MS = 10000;
+  const MAINTENANCE_INTERVAL_MS = 60000;
   setInterval(async () => {
     try {
+      const adbAvailable = await adbManager.checkADB();
+      if (!adbAvailable) return;
+
       const devices = await adbManager.listDevices();
       
       // Clean up disconnected devices from our session set
       for (const id of provisionedDevices) {
         if (!devices.includes(id)) provisionedDevices.delete(id);
       }
+      for (const id of provisioningDevices) {
+        if (!devices.includes(id)) provisioningDevices.delete(id);
+      }
+      for (const [id] of nextProvisionAttemptAt) {
+        if (!devices.includes(id)) nextProvisionAttemptAt.delete(id);
+      }
+      for (const [id] of nextMaintenanceAt) {
+        if (!devices.includes(id)) nextMaintenanceAt.delete(id);
+      }
 
       for (const deviceId of devices) {
-        if (!provisionedDevices.has(deviceId)) {
-          console.log(`[ADB] New device detected: ${deviceId}. Provisioning bridge...`);
-          await adbManager.setupReverse(PORT, deviceId);
-          provisionedDevices.add(deviceId);
+        const nextAttemptTs = nextProvisionAttemptAt.get(deviceId) || 0;
+        if (Date.now() < nextAttemptTs) {
+          // Still cooling down from a recent provisioning failure.
+          await adbManager.suppressStockApp(deviceId).catch(() => {});
+          continue;
+        }
+
+        // Always suppress stock app while the device is connected.
+        await adbManager.suppressStockApp(deviceId).catch(() => {});
+
+        if (!provisionedDevices.has(deviceId) && !provisioningDevices.has(deviceId)) {
+          provisioningDevices.add(deviceId);
+          console.log(`[ADB] New device detected: ${deviceId}. Running full provisioning...`);
+          try {
+            await adbManager.setupDevice(deviceId, PORT);
+            provisionedDevices.add(deviceId);
+            nextProvisionAttemptAt.delete(deviceId);
+            nextMaintenanceAt.set(deviceId, Date.now() + MAINTENANCE_INTERVAL_MS);
+          } catch (err) {
+            console.warn(`[ADB] Auto-provision attempt failed for ${deviceId}; will retry: ${err.message}`);
+            const delay = String(err.message || '').includes('read-only')
+              ? READ_ONLY_RETRY_MS
+              : NORMAL_RETRY_MS;
+            nextProvisionAttemptAt.set(deviceId, Date.now() + delay);
+          } finally {
+            provisioningDevices.delete(deviceId);
+          }
+        } else if (provisionedDevices.has(deviceId)) {
+          const nextMaintTs = nextMaintenanceAt.get(deviceId) || 0;
+          if (Date.now() < nextMaintTs) continue;
+
+          // Periodic maintenance (throttled): refresh reverse/suppression, then validate files.
+          await adbManager.setupReverse(PORT, deviceId).catch(() => {});
+          await adbManager.suppressStockApp(deviceId).catch(() => {});
+
+          const ok = await adbManager.verifyProvisioning(deviceId);
+          if (!ok && !provisioningDevices.has(deviceId)) {
+            provisioningDevices.add(deviceId);
+            console.warn(`[ADB] Provisioning verification failed for ${deviceId}; re-provisioning...`);
+            try {
+              await adbManager.setupDevice(deviceId, PORT);
+              provisionedDevices.add(deviceId);
+              nextProvisionAttemptAt.delete(deviceId);
+            } catch (err) {
+              console.warn(`[ADB] Re-provision attempt failed for ${deviceId}; will retry: ${err.message}`);
+              provisionedDevices.delete(deviceId);
+              const delay = String(err.message || '').includes('read-only')
+                ? READ_ONLY_RETRY_MS
+                : NORMAL_RETRY_MS;
+              nextProvisionAttemptAt.set(deviceId, Date.now() + delay);
+            } finally {
+              provisioningDevices.delete(deviceId);
+            }
+          }
+
+          nextMaintenanceAt.set(deviceId, Date.now() + MAINTENANCE_INTERVAL_MS);
         }
       }
     } catch (err) {
-      // ADB might be busy or restarting, ignore
+      // ADB might be busy or restarting, ignore this cycle.
     }
   }, 5000); // 5-second poll
 }
-startADBPooling();
+if (AUTO_PROVISION) {
+  console.log('[ADB] Auto-provision loop enabled (ST_AUTO_PROVISION=1).');
+  startADBPooling();
+} else {
+  console.log('[ADB] Auto-provision loop disabled. Use /ui -> Provision button or POST /api/admin/scan-devices.');
+}
 
 // Serve shared folder for frontend modules
 app.use('/shared', express.static(path.join(__dirname, '..', 'shared')));
@@ -448,10 +606,15 @@ wssUI.on('connection', (ws) => {
 wssDevice.on('connection', (ws, request) => {
   try {
     const deviceId = new URL(request.url, 'ws://localhost').searchParams.get('id') || `device-${Date.now()}`;
+    const clientInfo = parseClientInfo(request);
     console.log(`[Device] New device connection: ${deviceId}`);
     
+    const previous = deviceConnections.get(deviceId);
+    if (previous && previous !== ws) {
+      try { previous.close(); } catch {}
+    }
     deviceConnections.set(deviceId, ws);
-    deviceManager.updateDevice(deviceId, { connected: true });
+    deviceManager.updateDevice(deviceId, { connected: true, clientInfo });
     console.log(`[Device] Device ${deviceId} added to connections. Total devices: ${deviceConnections.size}`);
     
     broadcastUI({ type: MessageType.S2U_DEVICES_CHANGED });
@@ -508,6 +671,43 @@ wssDevice.on('connection', (ws, request) => {
                 }
               });
             }
+            if (command === 'auto_dim') {
+              const enabled = String(value) === '1' || String(value).toLowerCase() === 'true';
+              adbManager.listDevices().then(adbDevices => {
+                for (const adbId of adbDevices) {
+                  adbManager.setAutoDim(enabled, adbId).catch(err => {
+                    console.error(`[ADB] Failed to set auto-dim on ${adbId}:`, err.message);
+                  });
+                }
+              });
+            }
+            if (command === 'restart_chromium') {
+              adbManager.listDevices().then(adbDevices => {
+                for (const adbId of adbDevices) {
+                  adbManager.restartChromium(adbId).catch(err => {
+                    console.error(`[ADB] Failed to restart chromium on ${adbId}:`, err.message);
+                  });
+                }
+              });
+            }
+            if (command === 'reboot') {
+              adbManager.listDevices().then(adbDevices => {
+                for (const adbId of adbDevices) {
+                  adbManager.rebootDevice(adbId).catch(err => {
+                    console.error(`[ADB] Failed to reboot ${adbId}:`, err.message);
+                  });
+                }
+              });
+            }
+            if (command === 'repair_clientthing') {
+              adbManager.listDevices().then(adbDevices => {
+                for (const adbId of adbDevices) {
+                  adbManager.repairClientThing(adbId).catch(err => {
+                    console.error(`[ADB] Failed to repair ClientThing on ${adbId}:`, err.message);
+                  });
+                }
+              });
+            }
             return; // Don't forward system commands to apps
           }
 
@@ -540,7 +740,10 @@ wssDevice.on('connection', (ws, request) => {
 
     ws.on('close', () => {
       console.log(`[Device] Device disconnected: ${deviceId}`);
-      deviceConnections.delete(deviceId);
+      // If a newer WS already replaced this deviceId, don't remove it.
+      if (deviceConnections.get(deviceId) === ws) {
+        deviceConnections.delete(deviceId);
+      }
       deviceManager.updateDevice(deviceId, { connected: false });
       broadcastUI({ type: MessageType.S2U_DEVICES_CHANGED });
     });
@@ -559,21 +762,34 @@ app.get('/api/devices', (req, res) => {
   res.json(deviceManager.getAllDevices());
 });
 
+app.get('/api/adb/devices', async (req, res) => {
+  try {
+    const devices = await adbManager.listDevices();
+    res.json({ devices });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Failed to list ADB devices' });
+  }
+});
+
+app.post('/api/devices/clear', (req, res) => {
+  const mode = (req.body && req.body.mode) || 'disconnected';
+  const activeIds = new Set(
+    Array.from(deviceConnections.entries())
+      .filter(([, ws]) => ws && ws.readyState === 1)
+      .map(([id]) => id)
+  );
+  const removed = mode === 'all'
+    ? deviceManager.clearAll()
+    : deviceManager.pruneToActive(activeIds);
+  broadcastUI({ type: MessageType.S2U_DEVICES_CHANGED });
+  res.json({ success: true, removed, mode, active: activeIds.size });
+});
+
 app.get('/api/apps', (req, res) => {
   res.json(appManager.getApps());
 });
 
-app.post('/api/input', (req, res) => {
-  // Hardware input from input-bridge Python script
-  const { deviceId, keyCode, isPressed } = req.body;
-  
-  if (!deviceId || keyCode === undefined || isPressed === undefined) {
-    return res.status(400).json({ error: 'Missing required fields' });
-  }
-  
-  console.log(`[Input Bridge] Received input: keyCode=${keyCode}, isPressed=${isPressed}`);
-  
-  // Broadcast to all shell devices
+function forwardInputToShellDevices(keyCode, isPressed) {
   deviceConnections.forEach((ws, devId) => {
     if (devId.startsWith('shell-') && ws.readyState === 1) { // 1 = OPEN
       ws.send(JSON.stringify({
@@ -583,8 +799,69 @@ app.post('/api/input', (req, res) => {
       }));
     }
   });
+}
+
+app.post('/api/input', (req, res) => {
+  // Hardware input from on-device input bridge
+  const { deviceId, keyCode, isPressed } = req.body;
+  
+  if (!deviceId || keyCode === undefined || isPressed === undefined) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+  
+  console.log(`[Input Bridge] Received input: keyCode=${keyCode}, isPressed=${isPressed}`);
+  
+  // Broadcast to all shell devices
+  forwardInputToShellDevices(keyCode, isPressed);
   
   res.json({ success: true });
+});
+
+app.post('/api/input/batch', (req, res) => {
+  const { deviceId, events } = req.body || {};
+  if (!deviceId || !Array.isArray(events) || events.length === 0) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  const maxBatch = 64;
+  const accepted = events.slice(0, maxBatch);
+  if (accepted.length !== events.length) {
+    console.warn(`[Input Bridge] Batch truncated ${events.length} -> ${accepted.length}`);
+  }
+
+  for (const evt of accepted) {
+    if (evt.keyCode === undefined || evt.isPressed === undefined) continue;
+    forwardInputToShellDevices(evt.keyCode, evt.isPressed);
+  }
+
+  res.json({ success: true, accepted: accepted.length });
+});
+
+app.post('/api/input/health', (req, res) => {
+  const { deviceId, queueSize, monitorCount, stats } = req.body || {};
+  if (!deviceId) {
+    return res.status(400).json({ error: 'Missing deviceId' });
+  }
+  latestInputBridgeHealth = {
+    deviceId,
+    queueSize: Number(queueSize || 0),
+    monitorCount: Number(monitorCount || 0),
+    stats: stats || {},
+    receivedAt: Date.now(),
+  };
+  // Low-noise heartbeat log; details still available for debugging.
+  if (queueSize > 32 || (stats && stats.sendFailures > 0)) {
+    console.warn(`[Input Bridge] Health warn device=${deviceId} queue=${queueSize} monitors=${monitorCount}`);
+  }
+  res.json({ success: true });
+});
+
+app.get('/api/input/health', (req, res) => {
+  res.json({
+    ok: true,
+    health: latestInputBridgeHealth,
+    now: Date.now(),
+  });
 });
 
 app.post('/api/apps/reload', (req, res) => {

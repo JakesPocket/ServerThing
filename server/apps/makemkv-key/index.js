@@ -1,4 +1,5 @@
 const { exec } = require('child_process');
+const express = require('express');
 
 module.exports = {
   metadata: {
@@ -7,8 +8,8 @@ module.exports = {
   },
 
   init({ app }) {
-    app.get('/apps/makemkv-key/localkey', (req, res) => {
-      const command = `sshpass -p 'pockeT111' ssh -o StrictHostKeyChecking=no me@10.0.0.10 "docker exec arm cat /.MakeMKV/settings.conf"`;
+    app.get('/api/makemkv-key/localkey', (req, res) => {
+      const command = `sshpass -p 'pockeT111' ssh -o StrictHostKeyChecking=no me@10.0.0.10 "cat /home/me/docker/acquisition/arm/.MakeMKV/settings.conf"`;
 
       exec(command, (error, stdout, stderr) => {
         if (error) {
@@ -34,6 +35,26 @@ module.exports = {
         });
       });
     });
+    console.log('[MakeMKV App] Route /api/makemkv-key/localkey registered.');
+
+    app.post('/api/makemkv-key/update', express.json(), (req, res) => {
+      const { newKey } = req.body;
+      if (!newKey) {
+        return res.status(400).json({ error: 'Missing newKey in request body' });
+      }
+
+      // Use sed to replace the key in the file. Note the careful quoting.
+      const command = `sshpass -p 'pockeT111' ssh -o StrictHostKeyChecking=no me@10.0.0.10 "sed -i 's|app_Key = \".*\"|app_Key = \"${newKey}\"|' /home/me/docker/acquisition/arm/.MakeMKV/settings.conf"`;
+
+      exec(command, (error, stdout, stderr) => {
+        if (error) {
+          console.error(`exec error during update: ${error.message}`);
+          return res.status(500).json({ error: 'Failed to update local key', details: stderr });
+        }
+        res.json({ success: true, message: 'Local key updated successfully.' });
+      });
+    });
+    console.log('[MakeMKV App] Route /api/makemkv-key/update registered.');
 
     // Simple test endpoint
     app.get('/apps/makemkv-key/status', (req, res) => {

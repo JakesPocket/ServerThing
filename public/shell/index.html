@@ -15,7 +15,7 @@
     <div id="status-bar">
       <div class="status-bar-left">
         <button id="sys-nav-button" class="hidden" aria-label="Navigation">
-          <svg class="shell-icon" viewBox="0 -960 960 960"><path d="M400-80 0-480l400-400 71 71-329 329 329 329-71 71Z"/></svg>
+          <span class="material-symbols-outlined">arrow_back_ios_new</span>
         </button>
       </div>
       <div class="status-bar-center">
@@ -23,7 +23,7 @@
       </div>
       <div class="status-bar-right">
         <button id="sys-settings-button" class="status-icon-button" aria-label="Settings">
-          <svg class="shell-icon" viewBox="0 -960 960 960"><path d="m370-80-16-128q-13-5-24.5-12T307-235l-119 50L78-375l103-78q-1-7-1-13.5t1-13.5l-103-78 110-190 119 50q11-8 23-15t24-12l16-128h220l16 128q13 5 24.5 12t22.5 15l119-50 110 190-103 78q1 7 1 13.5t-1 13.5l103 78-110 190-119-50q-11 8-23 15t-24 12l-16 128H370Zm110-280q42 0 71-29t29-71q0-42-29-71t-71-29q-42 0-71 29t-29 71q0 42 29 71t71 29Z"/></svg>
+          <span class="material-symbols-outlined">settings</span>
         </button>
         <span id="status-connection">●</span>
       </div>
@@ -71,10 +71,10 @@
         </div>
         <div class="settings-content">
           <div class="setting-item">
-            <label>Brightness</label>
+            <label>Brightness <span id="brightness-value" class="setting-value">128</span></label>
             <div class="slider-container">
               <svg class="shell-icon sm" viewBox="0 -960 960 960"><path d="M480-360q50 0 85-35t35-85q0-50-35-85t-85-35q-50 0-85 35t-35 85q0 50 35 85t85 35Zm0 80q-83 0-141.5-58.5T280-480q0-83 58.5-141.5T480-680q83 0 141.5 58.5T680-480q0 83-58.5 141.5T480-280ZM200-440H40v-80h160v80Zm720 0H760v-80h160v80ZM440-760v-160h80v160h-80Zm0 720v-160h80v160h-80ZM256-650l-101-101 57-57 101 101-57 57Zm546-101-101 101-57-57 101-101 57 57ZM212-212l101-101 57 57-101 101-57-57Zm546 101-101-101 57-57 101 101-57 57ZM480-480Z"/></svg>
-              <input type="range" id="brightness-slider" min="1" max="255" value="128">
+              <input type="range" id="brightness-slider" min="1" max="255" step="5" value="128">
             </div>
           </div>
           <div class="setting-item">
@@ -89,6 +89,31 @@
               <input type="checkbox" id="mic-toggle">
             </div>
           </div>
+          <div class="setting-item diagnostics">
+            <label>Input Bridge Health</label>
+            <div class="diagnostics-grid">
+              <div class="diag-row"><span>Server Link</span><span id="diag-server-link">--</span></div>
+              <div class="diag-row"><span>Queue</span><span id="diag-queue-size">--</span></div>
+              <div class="diag-row"><span>Failures</span><span id="diag-send-failures">--</span></div>
+              <div class="diag-row"><span>Monitors</span><span id="diag-monitor-count">--</span></div>
+              <div class="diag-row"><span>Last Update</span><span id="diag-last-update">--</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-actions">
+          <button id="repair-clientthing" class="settings-action-btn" type="button">
+            <span class="material-symbols-outlined">build</span>
+            <span>Repair ClientThing</span>
+          </button>
+          <button id="restart-chromium" class="settings-action-btn" type="button">
+            <span class="material-symbols-outlined">refresh</span>
+            <span>Restart Chromium</span>
+          </button>
+          <button id="reboot-device" class="settings-action-btn danger" type="button">
+            <span class="material-symbols-outlined">restart_alt</span>
+            <span>Reboot</span>
+          </button>
         </div>
       </div>
     </div>
@@ -97,6 +122,27 @@
     <div id="loading" class="hidden">
       <div class="spinner"></div>
       <p>Loading...</p>
+    </div>
+
+    <!-- Full-screen disconnect overlay (shown when shell loses WS connection) -->
+    <div id="disconnect-screen" class="hidden">
+      <div class="disconnect-content">
+        <svg class="client-icon" viewBox="0 0 220 180" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <rect class="device-outline" x="16" y="36" width="132" height="72" rx="12" />
+          <rect class="device-screen" x="34" y="66" width="84" height="5" rx="2.5" />
+          <rect class="device-outline device-tablet" x="118" y="54" width="70" height="96" rx="10" />
+          <rect class="device-screen" x="132" y="96" width="42" height="4.5" rx="2.25" />
+          <rect class="device-outline device-phone" x="158" y="42" width="44" height="92" rx="9" />
+          <rect class="device-screen" x="167" y="76" width="25" height="4" rx="2" />
+
+          <circle class="device-led l1" cx="130" cy="130" r="4.5" />
+          <circle class="device-led l2" cx="146" cy="130" r="4.5" />
+          <circle class="device-led l3" cx="162" cy="130" r="4.5" />
+        </svg>
+        <h2>ClientThing</h2>
+        <p class="disconnect-title">Connection lost</p>
+        <p class="disconnect-status">Attempting to reconnect<span class="dot-pulse">...</span></p>
+      </div>
     </div>
   </div>
 

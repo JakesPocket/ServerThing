@@ -125,41 +125,74 @@ class MakeMkvApp {
   }
 
   async fetchAndRenderKeys() {
-    // 1. Setup the Forum Data (Internet)
+    this.elements.keysList.innerHTML = `<div class="key-item">Loading keys...</div>`;
+
+    // 1. Fetch Local Key from our new backend endpoint
+    let localKeyData;
+    try {
+      const response = await fetch('/api/makemkv-key/localkey');
+      const responseText = await response.text(); // Get response as text first
+
+      if (!response.ok) {
+        // If the server returned an error, try to parse it as JSON, but fall back to raw text
+        try {
+          const errData = JSON.parse(responseText);
+          throw new Error(errData.details || errData.error || `Server error: ${response.status}`);
+        } catch (e) {
+          // If the error response wasn't JSON, throw the raw text
+          throw new Error(`Server returned non-JSON error: ${responseText}`);
+        }
+      }
+      
+      // If the response was ok, parse the text as JSON
+      localKeyData = JSON.parse(responseText);
+      localKeyData.btnText = "Update"; // Add button text
+
+    } catch (error) {
+      console.error('[MakeMkvApp] Error fetching local key:', error.message);
+      localKeyData = {
+        id: 'local',
+        name: 'Local Config (ARM)',
+        value: 'N/A',
+        status: 'error',
+        expiry: `Error: ${error.message}`, // Display the detailed error
+        btnText: 'Retry'
+      };
+    }
+
+    // 2. Define Internet Key (still placeholder for now)
     const forumExpiry = new Date('2026-03-31');
     const today = new Date();
     const isForumExpired = today > forumExpiry;
-
-    // 2. Setup the Local Data (ARM)
-    const localKey = "T-OLD_KEY_IN_YOUR_SETTINGS_FILE"; 
-    const localExpiry = new Date('2026-01-31');
-    const isLocalExpired = today > localExpiry;
-
-    const data = {
-      "keys": [
-        { 
-          "id": "internet",
-          "name": "MakeMKV Forum (Internet)", 
-          "value": "T-URt6MHxNy3HmfVojU8pE05WQ6HfgVI8S@HiIeNcWFim9rBgNlOdLFROSATCsWikcKW", 
-          "status": isForumExpired ? "expired" : "valid",
-          "expiry": "2026-03-31",
-          "btnText": "Refresh"
-        },
-        { 
-          "id": "local",
-          "name": "Local Config (ARM)", 
-          "value": localKey, 
-          "status": isLocalExpired ? "expired" : "valid",
-          "expiry": "2026-01-31",
-          "btnText": "Update"
-        }
-      ]
+    
+    const internetKeyData = { 
+      "id": "internet",
+      "name": "MakeMKV Forum (Internet)", 
+      "value": "T-URt6MHxNy3HmfVojU8pE05WQ6HfgVI8S@HiIeNcWFim9rBgNlOdLFROSATCsWikcKW", 
+      "status": isForumExpired ? "expired" : "valid",
+      "expiry": "2026-03-31",
+      "btnText": "Refresh"
     };
+    
+    // 3. Compare local key to internet key to determine status/expiry
+    if (localKeyData && localKeyData.status !== 'error') {
+      if (localKeyData.value === internetKeyData.value) {
+        localKeyData.status = 'valid';
+        localKeyData.expiry = internetKeyData.expiry; // Inherit expiry from the valid key
+      } else {
+        localKeyData.status = 'expired';
+        localKeyData.expiry = 'Outdated';
+      }
+    }
 
-    this.elements.keysList.innerHTML = data.keys.map(key => `
+    // 4. Combine and Render
+    const keys = [internetKeyData, localKeyData];
+
+    this.elements.keysList.innerHTML = keys.map(key => `
       <div class="key-item status-${key.status}">
         <div class="key-info">
           <span class="key-item-name">${key.name}</span>
+          ${key.value && key.value !== 'N/A' ? `<span class="key-item-value">${key.value.substring(0, key.value.length / 2)}...</span>` : ''}
           <span class="key-expiry">Expires: ${key.expiry}</span>
         </div>
         <button class="key-action-btn" data-id="${key.id}" data-value="${key.value}">
@@ -168,40 +201,85 @@ class MakeMkvApp {
       </div>
     `).join('');
 
-    // Re-attach listeners with new logic
+    // 4. Re-attach listeners and update focus
     this.elements.keysList.querySelectorAll('.key-action-btn').forEach(button => {
       button.addEventListener('click', (e) => this.handleActionClick(e));
     });
-
     this.updateFocus();
   }
 
-  handleActionClick(e) {
-    const actionId = e.target.dataset.id;
-    const value = e.target.dataset.value;
+  async handleActionClick(e) {
+    const button = e.target;
+    const actionId = button.dataset.id;
 
     if (actionId === 'internet') {
       // Action: Manual Refresh/Rescrape
       console.log('[MakeMkvApp] Requesting Rescrape...');
-      e.target.textContent = 'Scanning...';
+      button.textContent = 'Scanning...';
       // In the future: fetch('/api/rescrape')
-      setTimeout(() => { e.target.textContent = 'Refreshed!'; }, 1500);
+      setTimeout(() => { button.textContent = 'Refreshed!'; }, 1500);
       
     } else if (actionId === 'local') {
       // Action: Overwrite Local Key with Internet Key
-      console.log('[MakeMkvApp] Overwriting Local Key with Internet Key...');
-      e.target.textContent = 'Updating...';
-      
-      // We grab the Internet key value from the data
-      const internetKey = "T-URt6MHxNy3HmfVojU8pE05WQ6HfgVI8S@HiIeNcWFim9rBgNlOdLFROSATCsWikcKW";
-      
-      // Post to your server to update the file
-      // window.parent.postMessage({ type: 'CMD_UPDATE_LOCAL_KEY', value: internetKey }, '*');
-      
-      setTimeout(() => { 
-        e.target.textContent = 'Updated!'; 
-        this.fetchAndRenderKeys(); // Refresh the list to show new status
-      }, 1500);
+      console.log('[MakeMkvApp] Updating Local Key...');
+      button.disabled = true;
+      button.textContent = 'Updating...';
+
+      // Find the internet key's value from the other button's data attribute
+      const internetKeyBtn = this.elements.keysList.querySelector('.key-action-btn[data-id="internet"]');
+      const newKey = internetKeyBtn ? internetKeyBtn.dataset.value : null;
+
+      if (!newKey) {
+        console.error('Could not find internet key value to update with.');
+        button.textContent = 'Error!';
+        button.disabled = false;
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/makemkv-key/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ newKey: newKey })
+        });
+
+        if (!response.ok) {
+          const responseText = await response.text();
+          try {
+            const errData = JSON.parse(responseText);
+            throw new Error(errData.details || errData.error);
+          } catch (e) {
+            throw new Error(`Server error: ${responseText}`);
+          }
+        }
+
+        button.textContent = 'Updated!';
+        // Refresh the list after a short delay to show the new status
+        setTimeout(() => {
+          this.fetchAndRenderKeys();
+        }, 1000);
+
+      } catch (error) {
+        console.error('[MakeMkvApp] Update failed:', error.message);
+        button.textContent = 'Failed!';
+        
+        // Display the specific error message in the UI for debugging
+        const keyItem = button.closest('.key-item');
+        if (keyItem) {
+          const expirySpan = keyItem.querySelector('.key-expiry');
+          if (expirySpan) {
+            expirySpan.textContent = `Update Error: ${error.message}`;
+            expirySpan.style.color = 'var(--error-color)';
+          }
+        }
+
+        setTimeout(() => {
+          button.disabled = false;
+          button.textContent = 'Retry';
+          // After timeout, maybe refresh to clear the error state
+          this.fetchAndRenderKeys();
+        }, 4000); // Longer timeout to allow reading the error
+      }
     }
   }
 

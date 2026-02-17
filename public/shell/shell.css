@@ -10,7 +10,7 @@ html {
 
 :root {
   /* Layout */
-  --status-bar-height: 2.5rem;       /* 40px @ 16px base */
+  --status-bar-height: 2.75rem;      /* Slightly taller status bar */
   --grid-columns: 4;
   --grid-rows: 3;
   --grid-gap: 0.75rem;
@@ -142,7 +142,7 @@ html, body {
 
 #sys-nav-button .material-symbols-outlined,
 #sys-settings-button .material-symbols-outlined {
-  font-size: 1.375rem;
+  font-size: 1.5rem;
   line-height: 1;
 }
 
@@ -150,6 +150,10 @@ html, body {
 #sys-settings-button.focused {
   background: rgba(255, 255, 255, 0.15);
   box-shadow: 0 0 0 calc(var(--focus-ring-width) / 2) var(--accent);
+}
+
+#sys-settings-button.focused {
+  box-shadow: 0 0 0 calc(var(--focus-ring-width) / 2) #fff;
 }
 
 #sys-nav-button.at-root {
@@ -163,7 +167,7 @@ html, body {
 #status-time {
   font-variant-numeric: tabular-nums;
   font-weight: 500;
-  font-size: 1rem;
+  font-size: 1.125rem;
 }
 
 #status-connection {
@@ -450,6 +454,106 @@ body:not(.material-font-loaded) .material-symbols-outlined {
 }
 
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ─── Disconnect Screen ───────────────────────────────────────────────────── */
+#disconnect-screen {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  min-width: 100vw;
+  min-height: 100vh;
+  background: #0a0a0a;
+  z-index: 3200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.disconnect-content {
+  animation: fade-in-up 0.3s ease-out;
+}
+
+#disconnect-screen .client-icon {
+  width: 320px;
+  height: 260px;
+  margin: 0 auto 22px;
+  display: block;
+}
+
+#disconnect-screen .device-outline {
+  fill: #141b26;
+  stroke: #4a9eff;
+  stroke-width: 3;
+}
+
+#disconnect-screen .device-screen {
+  fill: #335d90;
+}
+
+#disconnect-screen .device-tablet {
+  stroke: #6bb6ff;
+}
+
+#disconnect-screen .device-phone {
+  stroke: #4a9eff;
+}
+
+#disconnect-screen .device-led {
+  fill: #4a9eff;
+  opacity: 0.3;
+  transform-origin: center;
+  animation: device-led-blink 1.2s ease-in-out infinite;
+}
+
+#disconnect-screen .device-led.l1 { fill: #4a9eff; animation-delay: 0s; }
+#disconnect-screen .device-led.l2 { fill: #6bb6ff; animation-delay: 0.24s; }
+#disconnect-screen .device-led.l3 { fill: #53d37e; animation-delay: 0.48s; }
+
+#disconnect-screen h2 {
+  font-size: 48px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  line-height: 1;
+  margin-bottom: 16px;
+}
+
+.disconnect-title {
+  margin-top: 0;
+  color: #d0d0d0;
+  font-size: 24px;
+}
+
+.disconnect-status {
+  margin-top: 8px;
+  color: #7f8793;
+  font-size: 24px;
+}
+
+.dot-pulse {
+  display: inline-block;
+  animation: text-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes device-led-blink {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 1; }
+}
+
+@keyframes text-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(-0.5rem); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .hidden { display: none !important; }
 
 /* ─── Settings Overlay ─────────────────────────────────────────────────── */
@@ -472,10 +576,10 @@ body:not(.material-font-loaded) .material-symbols-outlined {
 
 .settings-panel {
   background: #1a1a1a;
-  width: 25rem;
+  width: 32rem;
   max-width: 90%;
   border-radius: 1.25rem;
-  padding: 1.5rem;
+  padding: 2rem;
   border: 0.0625rem solid #333;
   box-shadow: 0 0.625rem 2.5rem rgba(0, 0, 0, 0.5);
 }
@@ -489,7 +593,7 @@ body:not(.material-font-loaded) .material-symbols-outlined {
 
 .settings-header h3 {
   font-weight: 600;
-  font-size: 1.125rem;
+  font-size: 1.5rem;
 }
 
 .close-btn {
@@ -520,24 +624,133 @@ body:not(.material-font-loaded) .material-symbols-outlined {
 
 .setting-item label {
   display: block;
-  font-size: 0.875rem;
-  color: #888;
-  margin-bottom: 0.5rem;
+  font-size: 1.05rem;
+  color: #b5b5b5;
+  margin-bottom: 0.75rem;
+}
+
+.setting-value {
+  float: right;
+  font-variant-numeric: tabular-nums;
+  color: #8a8a8a;
 }
 
 .slider-container {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 1.25rem;
 }
 
 #brightness-slider {
   flex: 1;
   accent-color: var(--accent);
   cursor: pointer;
+  height: 1.5rem;
+}
+
+/* Bigger slider affordance for touch on Chromium */
+#brightness-slider::-webkit-slider-runnable-track {
+  height: 0.5rem;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 0.5rem;
+}
+
+#brightness-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background: #fff;
+  border: 0.1875rem solid rgba(0, 0, 0, 0.25);
+  margin-top: -0.5rem;
+}
+
+#brightness-slider:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .toggle-container {
   display: flex;
   justify-content: flex-end;
+}
+
+#auto-dim-toggle,
+#mic-toggle {
+  width: 1.5rem;
+  height: 1.5rem;
+  accent-color: var(--accent);
+}
+
+.setting-item.diagnostics {
+  margin-top: 0.25rem;
+}
+
+.diagnostics-grid {
+  display: grid;
+  gap: 0.35rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 0.0625rem solid #2f2f2f;
+  border-radius: 0.625rem;
+  padding: 0.65rem 0.75rem;
+}
+
+.diag-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.9rem;
+  color: #9ea6b2;
+}
+
+.diag-row span:last-child {
+  font-variant-numeric: tabular-nums;
+  color: #d4d9e0;
+}
+
+/* Settings actions (reboot / restart chromium) */
+.settings-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 0.0625rem solid #2a2a2a;
+}
+
+.settings-action-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.875rem 0.75rem;
+  border-radius: 0.875rem;
+  border: 0.0625rem solid #333;
+  background: #222;
+  color: #fff;
+  font-size: 1.05rem;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.settings-action-btn .material-symbols-outlined {
+  font-size: 1.4rem;
+  line-height: 1;
+}
+
+.settings-action-btn:active {
+  background: #2a2a2a;
+}
+
+.settings-action-btn.danger {
+  border-color: rgba(255, 90, 90, 0.35);
+  background: rgba(255, 60, 60, 0.14);
+}
+
+.settings-action-btn.danger:active {
+  background: rgba(255, 60, 60, 0.22);
 }

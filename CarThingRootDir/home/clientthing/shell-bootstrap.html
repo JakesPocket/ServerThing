@@ -27,8 +27,8 @@
         }
 
         .server-icon {
-            width: 320px;
-            height: 260px;
+            width: 224px;
+            height: 182px;
             margin: 0 auto 22px;
             display: block;
         }
@@ -145,14 +145,36 @@
         const updateStatus = (msg) => {
             document.getElementById('status').innerHTML = msg + '<span class="dot-pulse">...</span>';
         };
+        const target = 'http://127.0.0.1:3000/shell/index.html?t=';
+        const wsProbeUrl = 'ws://127.0.0.1:3000/ws/device?id=bootstrap-probe';
 
-        // Startup sequence
+        let attempts = 0;
+        const maxFastAttempts = 5;
+
+        const tryLaunchShell = () => {
+            attempts += 1;
+            updateStatus(attempts <= maxFastAttempts ? 'Loading shell' : 'Server unavailable');
+            let done = false;
+            const ws = new WebSocket(wsProbeUrl + '&t=' + Date.now());
+            const complete = (ok) => {
+                if (done) return;
+                done = true;
+                try { ws.close(); } catch (e) {}
+                if (ok) {
+                    window.location.replace(target + Date.now());
+                } else {
+                    const delay = attempts <= maxFastAttempts ? 1200 : 3000;
+                    setTimeout(tryLaunchShell, delay);
+                }
+            };
+            ws.onopen = () => complete(true);
+            ws.onerror = () => complete(false);
+            setTimeout(() => complete(false), 900);
+        };
+
+        // Startup sequence with local fallback retry loop.
         setTimeout(() => updateStatus('Establishing tunnel'), 500);
-        setTimeout(() => updateStatus('Loading shell'), 1000);
-        setTimeout(() => {
-            const target = 'http://127.0.0.1:3000/shell/index.html?t=' + Date.now();
-            window.location.replace(target);
-        }, 1500);
+        setTimeout(tryLaunchShell, 1200);
     </script>
 </body>
 </html>

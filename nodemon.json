@@ -1,6 +1,0 @@
-{
-  "ignore": ["data/*", "*.json"],
-  "watch": ["server/**/*.js", "shared/**/*.js"],
-  "ext": "js",
-  "verbose": false
-}

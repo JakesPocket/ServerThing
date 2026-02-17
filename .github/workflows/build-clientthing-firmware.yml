@@ -1,0 +1,70 @@
+name: Build ClientThing Firmware
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/build-clientthing-firmware.yml"
+      - "references/nixos-superbird/examples/flake/**"
+      - "references/nixos-superbird/examples/clientthing.nix"
+      - "CarThingRootDir/home/clientthing/**"
+
+jobs:
+  build-firmware:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install QEMU binfmt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static qemu-user-static-binfmt zip
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            extra-platforms = aarch64-linux
+
+      - name: Build installer
+        working-directory: references/nixos-superbird/examples/flake
+        run: |
+          nix --version
+          nix build '.#nixosConfigurations.superbird.config.system.build.installer' --show-trace --print-build-logs
+
+      - name: Prepare firmware bundle
+        working-directory: references/nixos-superbird/examples/flake
+        run: |
+          rm -rf out clientthing-superbird-firmware.zip
+          mkdir -p out
+          cp -rL result/* out/
+          sudo chown -R "$USER:$USER" out
+
+          if [ -x out/scripts/make-bootfs.sh ]; then
+            sudo out/scripts/make-bootfs.sh
+          fi
+
+          (
+            cd out
+            zip -r ../clientthing-superbird-firmware.zip .
+          )
+
+      - name: Upload firmware zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: clientthing-superbird-firmware-zip
+          path: references/nixos-superbird/examples/flake/clientthing-superbird-firmware.zip
+          if-no-files-found: error
+
+      - name: Upload raw build output
+        uses: actions/upload-artifact@v4
+        with:
+          name: clientthing-superbird-firmware-out
+          path: references/nixos-superbird/examples/flake/out
+          if-no-files-found: error
