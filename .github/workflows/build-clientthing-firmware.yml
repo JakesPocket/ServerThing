@@ -48,6 +48,14 @@ jobs:
           print("Patched flake modules for clientthing.nix")
           PY
 
+          # Nix flakes only see tracked files in git repos.
+          git -C references/nixos-superbird add \
+            examples/clientthing.nix \
+            examples/clientthing-assets/shell-bootstrap.html \
+            examples/clientthing-assets/appstart.png \
+            examples/clientthing-assets/input-bridge.js \
+            examples/flake/flake.nix
+
       - name: Install Nix
         uses: cachix/install-nix-action@v31
         with:
