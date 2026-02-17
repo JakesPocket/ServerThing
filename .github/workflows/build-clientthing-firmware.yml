@@ -85,7 +85,10 @@ jobs:
           sudo chown -R "$USER:$USER" out
 
           if [ -x out/scripts/make-bootfs.sh ]; then
-            sudo out/scripts/make-bootfs.sh
+            (
+              cd out
+              sudo ./scripts/make-bootfs.sh
+            )
           fi
 
           (
