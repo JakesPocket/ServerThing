@@ -5,8 +5,7 @@ on:
   push:
     paths:
       - ".github/workflows/build-clientthing-firmware.yml"
-      - "references/nixos-superbird/examples/flake/**"
-      - "references/nixos-superbird/examples/clientthing.nix"
+      - "firmware/clientthing.nix"
       - "CarThingRootDir/home/clientthing/**"
 
 jobs:
@@ -21,7 +20,33 @@ jobs:
       - name: Install QEMU binfmt
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-user-static qemu-user-static-binfmt zip
+          sudo apt-get install -y qemu-user-static binfmt-support zip
+          sudo update-binfmts --enable qemu-aarch64 || true
+
+      - name: Clone nixos-superbird
+        run: |
+          rm -rf references/nixos-superbird
+          git clone --depth 1 https://github.com/JoeyEamigh/nixos-superbird references/nixos-superbird
+
+      - name: Stage ClientThing overlay
+        run: |
+          mkdir -p references/nixos-superbird/examples/clientthing-assets
+          cp CarThingRootDir/home/clientthing/shell-bootstrap.html references/nixos-superbird/examples/clientthing-assets/shell-bootstrap.html
+          cp CarThingRootDir/home/clientthing/appstart.png references/nixos-superbird/examples/clientthing-assets/appstart.png
+          cp CarThingRootDir/home/clientthing/input-bridge.js references/nixos-superbird/examples/clientthing-assets/input-bridge.js
+          cp firmware/clientthing.nix references/nixos-superbird/examples/clientthing.nix
+
+          python3 - <<'PY'
+          from pathlib import Path
+          flake = Path("references/nixos-superbird/examples/flake/flake.nix")
+          text = flake.read_text()
+          needle = "            nixos-superbird.nixosModules.superbird\n"
+          add = "            ./../clientthing.nix\n"
+          if add not in text:
+            text = text.replace(needle, needle + add)
+          flake.write_text(text)
+          print("Patched flake modules for clientthing.nix")
+          PY
 
       - name: Install Nix
         uses: cachix/install-nix-action@v31
