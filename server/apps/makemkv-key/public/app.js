@@ -1,65 +1,76 @@
-// MakeMKV Key App - Refit for Shell Communication Bridge
-
-// Production Build
-import { InputType } from '/shared/protocol.js';
-
-class MakeMkvApp {
+class MakeMkvMonitorApp {
   constructor() {
     this.elements = {
       mainScreen: document.getElementById('main-screen'),
       settingsScreen: document.getElementById('settings-screen'),
-      keysList: document.getElementById('keys-list'),
-      settingsButton: document.getElementById('settings-button'),
-      backButton: document.getElementById('back-button'),
+      updatedAt: document.getElementById('updated-at'),
+      hero: document.getElementById('hero'),
+      posterImg: document.getElementById('poster-img'),
+      posterFallback: document.getElementById('poster-fallback'),
+      movieTitle: document.getElementById('movie-title'),
+      movieSubline: document.getElementById('movie-subline'),
+      progressBar: document.getElementById('progress-bar'),
+      ripProgress: document.getElementById('rip-progress'),
+      ripEta: document.getElementById('rip-eta'),
+      transcodeProgress: document.getElementById('transcode-progress'),
+      transcodeEta: document.getElementById('transcode-eta'),
+      speedFps: document.getElementById('speed-fps'),
+      codecGpu: document.getElementById('codec-gpu'),
+      keyChip: document.getElementById('key-chip'),
+      driveChip: document.getElementById('drive-chip'),
+      readyChip: document.getElementById('ready-chip'),
+      issues: document.getElementById('issues'),
+      applyKeyBtn: document.getElementById('apply-key-btn'),
+      refreshBtn: document.getElementById('refresh-btn'),
+      settingsBtn: document.getElementById('settings-btn'),
+      backBtn: document.getElementById('back-btn'),
     };
-    this.focusedIndex = 0;
+
     this.isSettingsVisible = false;
+    this.focusedIndex = 0;
+    this.pollMs = 2000;
+    this.failCount = 0;
+    this.pollTimer = null;
+    this.pollAbort = null;
+    this.lastGoodData = null;
+
     this.init();
   }
 
   init() {
-    console.log('[MakeMkvApp] Initializing');
-    this.fetchAndRenderKeys();
     this.addEventListeners();
-    // Inform the shell that we are at the root view
+    this.fetchAndRenderHealth();
     this.sendNavState(true);
   }
 
   addEventListeners() {
     window.addEventListener('message', (event) => this.handleShellMessage(event));
-    
-    // UI Click Handlers
-    this.elements.settingsButton.addEventListener('click', () => this.showSettings());
-    this.elements.backButton.addEventListener('click', () => this.showMain());
+    this.elements.refreshBtn.addEventListener('click', () => this.fetchAndRenderHealth(true));
+    this.elements.settingsBtn.addEventListener('click', () => this.showSettings());
+    this.elements.backBtn.addEventListener('click', () => this.showMain());
+    this.elements.applyKeyBtn.addEventListener('click', () => this.applyLatestKey());
   }
 
   handleShellMessage(event) {
     if (event.source !== window.parent) return;
-
-    const message = event.data;
-    console.log('[MakeMkvApp] Message received:', message);
+    const message = event.data || {};
 
     if (message.type === 'HARDWARE_EVENT' && message.data) {
       this.handleHardwareInput(message.data);
     } else if (message.type === 'CMD_BACK') {
-      this.handleBackCommand();
+      if (this.isSettingsVisible) this.showMain();
     } else if (message.type === 'DIM_APP_FOCUS') {
-      // Shell moved focus away — dim our highlights
-      this.getFocusableElements().forEach(el => el.classList.remove('focused'));
+      this.getFocusableElements().forEach((el) => el.classList.remove('focused'));
     } else if (message.type === 'ZONE_FOCUS' && message.active) {
-      // Shell returned focus to us — re-apply highlight
       this.updateFocus();
     }
   }
 
   handleHardwareInput(input) {
-    if (!input) return;
+    const type = String(input.type || '').toUpperCase();
+    const value = String(input.value || '').toUpperCase();
+    if (!type || !value) return;
 
-    // Normalize input for OS-level consistency
-    const type = String(input.type).toUpperCase();
-    const value = String(input.value).toUpperCase();
-
-    // 1. Context: Settings Screen
     if (this.isSettingsVisible) {
       if (type === 'BUTTON' && (value === 'DIAL_CLICK_DOWN' || value === 'BACK_BUTTON_DOWN')) {
         this.showMain();
@@ -67,39 +78,33 @@ class MakeMkvApp {
       return;
     }
 
-    // 2. Context: Main Screen Navigation
     const focusable = this.getFocusableElements();
+    if (!focusable.length) return;
+
     if (type === 'DIAL') {
       if (value === 'RIGHT') {
         this.focusedIndex = (this.focusedIndex + 1) % focusable.length;
       } else if (value === 'LEFT') {
         if (this.focusedIndex > 0) {
-          this.focusedIndex--;
+          this.focusedIndex -= 1;
         } else {
-          // At first item — escape to Shell status bar
           window.parent.postMessage({ type: 'APP_AT_TOP' }, location.origin);
           return;
         }
       }
       this.updateFocus();
-    } else if (type === 'BUTTON' && value === 'DIAL_CLICK_DOWN') {
-      const target = focusable[this.focusedIndex];
-      if (target) target.click();
+      return;
     }
-  }
 
-  handleBackCommand() {
-    // If shell sends CMD_BACK while we are in settings, close settings
-    if (this.isSettingsVisible) {
-      this.showMain();
+    if (type === 'BUTTON' && value === 'DIAL_CLICK_DOWN') {
+      focusable[this.focusedIndex]?.click();
     }
   }
 
   getFocusableElements() {
-    return [
-      ...this.elements.keysList.querySelectorAll('.key-action-btn'),
-      this.elements.settingsButton
-    ];
+    return this.isSettingsVisible
+      ? [this.elements.backBtn]
+      : [this.elements.applyKeyBtn, this.elements.refreshBtn, this.elements.settingsBtn];
   }
 
   updateFocus() {
@@ -111,186 +116,249 @@ class MakeMkvApp {
 
   showSettings() {
     this.isSettingsVisible = true;
+    this.focusedIndex = 0;
     this.elements.mainScreen.classList.remove('active');
     this.elements.settingsScreen.classList.add('active');
-    this.sendNavState(false); // No longer at root
+    this.sendNavState(false);
+    this.updateFocus();
   }
 
   showMain() {
     this.isSettingsVisible = false;
+    this.focusedIndex = 0;
     this.elements.settingsScreen.classList.remove('active');
     this.elements.mainScreen.classList.add('active');
-    this.sendNavState(true); // Back at root
+    this.sendNavState(true);
     this.updateFocus();
-  }
-
-  async fetchAndRenderKeys() {
-    this.elements.keysList.innerHTML = `<div class="key-item">Loading keys...</div>`;
-
-    // 1. Fetch Local Key from our new backend endpoint
-    let localKeyData;
-    try {
-      const response = await fetch('/api/makemkv-key/localkey');
-      const responseText = await response.text(); // Get response as text first
-
-      if (!response.ok) {
-        // If the server returned an error, try to parse it as JSON, but fall back to raw text
-        try {
-          const errData = JSON.parse(responseText);
-          throw new Error(errData.details || errData.error || `Server error: ${response.status}`);
-        } catch (e) {
-          // If the error response wasn't JSON, throw the raw text
-          throw new Error(`Server returned non-JSON error: ${responseText}`);
-        }
-      }
-      
-      // If the response was ok, parse the text as JSON
-      localKeyData = JSON.parse(responseText);
-      localKeyData.btnText = "Update"; // Add button text
-
-    } catch (error) {
-      console.error('[MakeMkvApp] Error fetching local key:', error.message);
-      localKeyData = {
-        id: 'local',
-        name: 'Local Config (ARM)',
-        value: 'N/A',
-        status: 'error',
-        expiry: `Error: ${error.message}`, // Display the detailed error
-        btnText: 'Retry'
-      };
-    }
-
-    // 2. Define Internet Key (still placeholder for now)
-    const forumExpiry = new Date('2026-03-31');
-    const today = new Date();
-    const isForumExpired = today > forumExpiry;
-    
-    const internetKeyData = { 
-      "id": "internet",
-      "name": "MakeMKV Forum (Internet)", 
-      "value": "T-URt6MHxNy3HmfVojU8pE05WQ6HfgVI8S@HiIeNcWFim9rBgNlOdLFROSATCsWikcKW", 
-      "status": isForumExpired ? "expired" : "valid",
-      "expiry": "2026-03-31",
-      "btnText": "Refresh"
-    };
-    
-    // 3. Compare local key to internet key to determine status/expiry
-    if (localKeyData && localKeyData.status !== 'error') {
-      if (localKeyData.value === internetKeyData.value) {
-        localKeyData.status = 'valid';
-        localKeyData.expiry = internetKeyData.expiry; // Inherit expiry from the valid key
-      } else {
-        localKeyData.status = 'expired';
-        localKeyData.expiry = 'Outdated';
-      }
-    }
-
-    // 4. Combine and Render
-    const keys = [internetKeyData, localKeyData];
-
-    this.elements.keysList.innerHTML = keys.map(key => `
-      <div class="key-item status-${key.status}">
-        <div class="key-info">
-          <span class="key-item-name">${key.name}</span>
-          ${key.value && key.value !== 'N/A' ? `<span class="key-item-value">${key.value.substring(0, key.value.length / 2)}...</span>` : ''}
-          <span class="key-expiry">Expires: ${key.expiry}</span>
-        </div>
-        <button class="key-action-btn" data-id="${key.id}" data-value="${key.value}">
-          ${key.btnText}
-        </button>
-      </div>
-    `).join('');
-
-    // 4. Re-attach listeners and update focus
-    this.elements.keysList.querySelectorAll('.key-action-btn').forEach(button => {
-      button.addEventListener('click', (e) => this.handleActionClick(e));
-    });
-    this.updateFocus();
-  }
-
-  async handleActionClick(e) {
-    const button = e.target;
-    const actionId = button.dataset.id;
-
-    if (actionId === 'internet') {
-      // Action: Manual Refresh/Rescrape
-      console.log('[MakeMkvApp] Requesting Rescrape...');
-      button.textContent = 'Scanning...';
-      // In the future: fetch('/api/rescrape')
-      setTimeout(() => { button.textContent = 'Refreshed!'; }, 1500);
-      
-    } else if (actionId === 'local') {
-      // Action: Overwrite Local Key with Internet Key
-      console.log('[MakeMkvApp] Updating Local Key...');
-      button.disabled = true;
-      button.textContent = 'Updating...';
-
-      // Find the internet key's value from the other button's data attribute
-      const internetKeyBtn = this.elements.keysList.querySelector('.key-action-btn[data-id="internet"]');
-      const newKey = internetKeyBtn ? internetKeyBtn.dataset.value : null;
-
-      if (!newKey) {
-        console.error('Could not find internet key value to update with.');
-        button.textContent = 'Error!';
-        button.disabled = false;
-        return;
-      }
-
-      try {
-        const response = await fetch('/api/makemkv-key/update', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ newKey: newKey })
-        });
-
-        if (!response.ok) {
-          const responseText = await response.text();
-          try {
-            const errData = JSON.parse(responseText);
-            throw new Error(errData.details || errData.error);
-          } catch (e) {
-            throw new Error(`Server error: ${responseText}`);
-          }
-        }
-
-        button.textContent = 'Updated!';
-        // Refresh the list after a short delay to show the new status
-        setTimeout(() => {
-          this.fetchAndRenderKeys();
-        }, 1000);
-
-      } catch (error) {
-        console.error('[MakeMkvApp] Update failed:', error.message);
-        button.textContent = 'Failed!';
-        
-        // Display the specific error message in the UI for debugging
-        const keyItem = button.closest('.key-item');
-        if (keyItem) {
-          const expirySpan = keyItem.querySelector('.key-expiry');
-          if (expirySpan) {
-            expirySpan.textContent = `Update Error: ${error.message}`;
-            expirySpan.style.color = 'var(--error-color)';
-          }
-        }
-
-        setTimeout(() => {
-          button.disabled = false;
-          button.textContent = 'Retry';
-          // After timeout, maybe refresh to clear the error state
-          this.fetchAndRenderKeys();
-        }, 4000); // Longer timeout to allow reading the error
-      }
-    }
   }
 
   sendNavState(isAtRoot) {
-    window.parent.postMessage({
-      type: 'APP_NAV_STATE',
-      atRoot: isAtRoot
-    }, location.origin);
+    window.parent.postMessage({ type: 'APP_NAV_STATE', atRoot: isAtRoot }, location.origin);
+  }
+
+  formatEta(sec) {
+    if (!Number.isFinite(sec) || sec <= 0) return '-';
+    const s = Math.floor(sec % 60);
+    const m = Math.floor((sec / 60) % 60);
+    const h = Math.floor(sec / 3600);
+    if (h > 0) return `${h}h ${m}m`;
+    return `${m}m ${s}s`;
+  }
+
+  renderChips(data) {
+    const keyState = data.keyStatus?.state || 'unknown';
+    this.elements.keyChip.textContent = `License: ${keyState}`;
+    this.elements.keyChip.className = 'chip';
+    if (keyState === 'valid') this.elements.keyChip.classList.add('good');
+    else if (keyState === 'expired' || keyState === 'missing') this.elements.keyChip.classList.add('warn');
+    else if (keyState === 'error') this.elements.keyChip.classList.add('bad');
+
+    const driveText = data.drive?.detected ? `Drive: ${data.drive.count} detected` : 'Drive: none';
+    this.elements.driveChip.textContent = driveText;
+    this.elements.driveChip.className = `chip ${data.drive?.detected ? 'good' : 'warn'}`;
+
+    const ready = !!data.readyToRip;
+    this.elements.readyChip.textContent = ready ? 'Ready: yes' : 'Ready: no';
+    this.elements.readyChip.className = `chip ${ready ? 'good' : 'warn'}`;
+  }
+
+  renderHero(data) {
+    this.elements.hero.className = 'hero';
+    if (data.state === 'ripping') {
+      this.elements.hero.classList.add('ripping');
+      this.elements.hero.textContent = 'Ripping in Progress';
+      return;
+    }
+    if (data.state === 'transcoding') {
+      this.elements.hero.classList.add('transcoding');
+      this.elements.hero.textContent = 'Transcoding in Progress';
+      return;
+    }
+    if (data.state === 'error' || data.state === 'degraded') {
+      this.elements.hero.classList.add('error');
+      this.elements.hero.textContent = 'System Needs Attention';
+      return;
+    }
+    if (data.readyToRip) {
+      this.elements.hero.classList.add('idle-good');
+      this.elements.hero.textContent = 'Ready to Rip';
+      return;
+    }
+    this.elements.hero.classList.add('idle-bad');
+    this.elements.hero.textContent = 'Not Ready to Rip';
+  }
+
+  renderPoster(media) {
+    const url = media?.posterUrl || '';
+    if (url) {
+      this.elements.posterImg.src = url;
+      this.elements.posterImg.style.display = 'block';
+      this.elements.posterFallback.style.display = 'none';
+    } else {
+      this.elements.posterImg.removeAttribute('src');
+      this.elements.posterImg.style.display = 'none';
+      this.elements.posterFallback.style.display = 'block';
+      this.elements.posterFallback.textContent = media?.title ? `No cover for ${media.title}` : 'No cover art';
+    }
+  }
+
+  renderIssues(issues) {
+    if (!issues || !issues.length) {
+      this.elements.issues.style.display = 'none';
+      this.elements.issues.innerHTML = '';
+      return;
+    }
+    this.elements.issues.style.display = 'block';
+    this.elements.issues.innerHTML = issues.map((issue) => `- ${issue}`).join('<br>');
+  }
+
+  renderHealth(data, stale = false) {
+    const updatedDate = data.updatedAt ? new Date(data.updatedAt) : new Date();
+    this.elements.updatedAt.textContent = `${stale ? 'Stale' : 'Updated'}: ${updatedDate.toLocaleTimeString()}`;
+    this.renderHero(data);
+
+    const title = data.media?.title || data.rip?.title || data.rip?.discLabel || 'No active media';
+    this.elements.movieTitle.textContent = title;
+
+    if (data.state === 'ripping') {
+      this.elements.movieSubline.textContent = `Ripping from ${data.rip?.discLabel || 'disc source'}`;
+    } else if (data.state === 'transcoding') {
+      this.elements.movieSubline.textContent = 'Transcoding active';
+    } else {
+      this.elements.movieSubline.textContent = data.keyStatus?.message || 'Idle';
+    }
+
+    const progressPct =
+      Number.isFinite(data.rip?.progressPct) ? data.rip.progressPct :
+      Number.isFinite(data.transcode?.progressPct) ? data.transcode.progressPct :
+      0;
+    this.elements.progressBar.style.width = `${Math.max(0, Math.min(100, progressPct))}%`;
+
+    this.elements.ripProgress.textContent = Number.isFinite(data.rip?.progressPct) ? `${data.rip.progressPct.toFixed(1)}%` : '-';
+    this.elements.ripEta.textContent = this.formatEta(data.rip?.etaSec);
+    this.elements.transcodeProgress.textContent = Number.isFinite(data.transcode?.progressPct) ? `${data.transcode.progressPct.toFixed(1)}%` : '-';
+    this.elements.transcodeEta.textContent = this.formatEta(data.transcode?.etaSec);
+
+    const speed = Number.isFinite(data.transcode?.speedX) ? `${data.transcode.speedX.toFixed(2)}x` : '-';
+    const fps = Number.isFinite(data.transcode?.fps) ? `${data.transcode.fps.toFixed(1)} fps` : '-';
+    this.elements.speedFps.textContent = `${speed} / ${fps}`;
+
+    const codec = data.transcode?.codec || '-';
+    const gpu = data.transcode?.gpuDetail || data.transcode?.gpuMode || 'unknown';
+    this.elements.codecGpu.textContent = `${codec} / ${gpu}`;
+
+    this.renderPoster(data.media || {});
+    this.renderChips(data);
+    this.renderIssues(data.issues || []);
+    this.updateFocus();
+  }
+
+  async fetchJson(url, options = {}, timeoutMs = 9000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      const text = await response.text();
+      let json = {};
+      if (text) {
+        try {
+          json = JSON.parse(text);
+        } catch {
+          throw new Error(text);
+        }
+      }
+      if (!response.ok) {
+        throw new Error(json.error || json.message || `HTTP ${response.status}`);
+      }
+      return json;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  scheduleNextPoll() {
+    clearTimeout(this.pollTimer);
+    this.pollTimer = setTimeout(() => this.fetchAndRenderHealth(), this.pollMs);
+  }
+
+  async fetchAndRenderHealth(manual = false) {
+    if (this.pollAbort) this.pollAbort.abort();
+    this.pollAbort = new AbortController();
+
+    try {
+      const response = await fetch('/api/makemkv-key/health', { signal: this.pollAbort.signal });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || data.message || `HTTP ${response.status}`);
+      }
+
+      this.lastGoodData = data;
+      this.failCount = 0;
+      this.pollMs = 2000;
+      this.renderHealth(data, false);
+    } catch (error) {
+      this.failCount += 1;
+      this.pollMs = this.failCount >= 2 ? 5000 : 2000;
+
+      if (this.lastGoodData) {
+        const staleData = {
+          ...this.lastGoodData,
+          issues: [...(this.lastGoodData.issues || []), `Live update failed: ${error.message}`],
+        };
+        this.renderHealth(staleData, true);
+      } else {
+        this.renderHealth({
+          state: 'error',
+          updatedAt: Date.now(),
+          rip: {},
+          transcode: {},
+          media: {},
+          keyStatus: { state: 'error', message: 'No telemetry yet' },
+          readyToRip: false,
+          issues: [error.message || 'Health fetch failed'],
+          drive: { detected: false, count: 0, devices: [] },
+        }, false);
+      }
+    } finally {
+      if (!manual) this.scheduleNextPoll();
+      this.pollAbort = null;
+    }
+  }
+
+  async applyLatestKey() {
+    this.elements.applyKeyBtn.disabled = true;
+    const oldText = this.elements.applyKeyBtn.textContent;
+    this.elements.applyKeyBtn.textContent = 'Applying...';
+
+    try {
+      const keyStatus = await this.fetchJson('/api/makemkv-key/key-status');
+      const internetKey = keyStatus.internetKey;
+      if (!internetKey) throw new Error('No internet key configured on server');
+
+      await this.fetchJson('/api/makemkv-key/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newKey: internetKey }),
+      });
+
+      this.elements.applyKeyBtn.textContent = 'Applied';
+      setTimeout(() => {
+        this.elements.applyKeyBtn.textContent = oldText;
+        this.elements.applyKeyBtn.disabled = false;
+      }, 1000);
+      this.fetchAndRenderHealth(true);
+    } catch (error) {
+      this.elements.applyKeyBtn.textContent = 'Failed';
+      const currentIssues = this.lastGoodData?.issues || [];
+      this.renderIssues([...currentIssues, `Apply key failed: ${error.message}`]);
+      setTimeout(() => {
+        this.elements.applyKeyBtn.textContent = oldText;
+        this.elements.applyKeyBtn.disabled = false;
+      }, 1600);
+    }
   }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  new MakeMkvApp();
+  new MakeMkvMonitorApp();
 });

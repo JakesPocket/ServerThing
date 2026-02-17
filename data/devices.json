@@ -2,7 +2,7 @@
   {
     "id": "shell-mlpvz96z-qzyzqg",
     "connected": false,
-    "lastSeen": 1771292820758,
+    "lastSeen": 1771299735790,
     "inputs": [],
     "clientInfo": {
       "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
@@ -10,58 +10,6 @@
       "platform": "macOS",
       "deviceClass": "desktop",
       "ip": "::1"
-    }
-  },
-  {
-    "id": "shell-i4dedle2-asegdt",
-    "connected": false,
-    "lastSeen": 1771292833973,
-    "inputs": [],
-    "clientInfo": {
-      "userAgent": "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/69.0.3497.128 Safari/537.36",
-      "browser": "Chrome",
-      "platform": "Linux",
-      "deviceClass": "desktop",
-      "ip": "::ffff:127.0.0.1"
-    }
-  },
-  {
-    "id": "bootstrap-probe",
-    "connected": false,
-    "lastSeen": 1771292859925,
-    "inputs": [],
-    "clientInfo": {
-      "userAgent": "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/69.0.3497.128 Safari/537.36",
-      "browser": "Chrome",
-      "platform": "Linux",
-      "deviceClass": "desktop",
-      "ip": "::ffff:127.0.0.1"
-    }
-  },
-  {
-    "id": "shell-mlpxznhw-ldnks7",
-    "connected": false,
-    "lastSeen": 1771292826977,
-    "inputs": [],
-    "clientInfo": {
-      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
-      "browser": "Chrome",
-      "platform": "macOS",
-      "deviceClass": "desktop",
-      "ip": "::ffff:127.0.0.1"
-    }
-  },
-  {
-    "id": "shell-i4dd9hto-isk23y",
-    "connected": false,
-    "lastSeen": 1771292860287,
-    "inputs": [],
-    "clientInfo": {
-      "userAgent": "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/69.0.3497.128 Safari/537.36",
-      "browser": "Chrome",
-      "platform": "Linux",
-      "deviceClass": "desktop",
-      "ip": "::ffff:127.0.0.1"
     }
   }
 ]
