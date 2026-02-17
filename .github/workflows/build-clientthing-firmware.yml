@@ -44,6 +44,13 @@ jobs:
           add = "            ./../clientthing.nix\n"
           if add not in text:
             text = text.replace(needle, needle + add)
+          # Disable any upstream GUI selections so only clientthing.nix provides one GUI mode.
+          cleaned = []
+          for line in text.splitlines():
+            if "superbird.gui." in line and "=" in line and not line.lstrip().startswith("#"):
+              continue
+            cleaned.append(line)
+          text = "\n".join(cleaned) + "\n"
           flake.write_text(text)
           print("Patched flake modules for clientthing.nix")
           PY
