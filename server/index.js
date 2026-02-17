@@ -6,13 +6,66 @@ const fs = require('fs');
 const { MessageType } = require('../shared/protocol.js');
 const multer = require('multer');
 const AdmZip = require('adm-zip');
+const adbManager = require('./adb-manager');
 
 const PORT = process.env.PORT || 3000;
+const AUTO_PROVISION = String(process.env.ST_AUTO_PROVISION || '').toLowerCase() === '1'
+  || String(process.env.ST_AUTO_PROVISION || '').toLowerCase() === 'true';
+// Latest heartbeat from on-device input bridge (for diagnostics UI).
+let latestInputBridgeHealth = null;
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const APPS_DIR = path.join(__dirname, 'apps');
 
 // Multer setup for file uploads in memory
 const upload = multer({ storage: multer.memoryStorage() });
+
+const app = express();
+const server = http.createServer(app);
+
+function detectBrowser(userAgent = '') {
+  const ua = String(userAgent).toLowerCase();
+  if (!ua) return 'Unknown';
+  if (ua.includes('edg/')) return 'Edge';
+  if (ua.includes('opr/') || ua.includes('opera')) return 'Opera';
+  if (ua.includes('firefox/') || ua.includes('fxios')) return 'Firefox';
+  if (ua.includes('crios') || ua.includes('chrome/') || ua.includes('chromium')) return 'Chrome';
+  if (ua.includes('safari/')) return 'Safari';
+  return 'Unknown';
+}
+
+function detectPlatform(userAgent = '') {
+  const ua = String(userAgent).toLowerCase();
+  if (ua.includes('iphone') || ua.includes('ipad') || ua.includes('ipod')) return 'iOS';
+  if (ua.includes('android')) return 'Android';
+  if (ua.includes('windows')) return 'Windows';
+  if (ua.includes('mac os x') || ua.includes('macintosh')) return 'macOS';
+  if (ua.includes('linux')) return 'Linux';
+  return 'Unknown';
+}
+
+function detectDeviceClass(userAgent = '') {
+  const ua = String(userAgent).toLowerCase();
+  if (ua.includes('ipad') || ua.includes('tablet')) return 'tablet';
+  if (ua.includes('iphone') || ua.includes('ipod') || ua.includes('android') || ua.includes('mobile') || ua.includes('windows phone')) {
+    return 'mobile';
+  }
+  return 'desktop';
+}
+
+function parseClientInfo(request) {
+  const userAgent = request.headers['user-agent'] || '';
+  const xfwd = request.headers['x-forwarded-for'];
+  const ip = Array.isArray(xfwd)
+    ? xfwd[0]
+    : (typeof xfwd === 'string' && xfwd.length > 0 ? xfwd.split(',')[0].trim() : request.socket.remoteAddress);
+  return {
+    userAgent,
+    browser: detectBrowser(userAgent),
+    platform: detectPlatform(userAgent),
+    deviceClass: detectDeviceClass(userAgent),
+    ip: ip || 'unknown',
+  };
+}
 
 /**
  * Manages reading and writing state to the filesystem.
@@ -130,6 +183,37 @@ class DeviceStateManager {
     this.devices.delete(deviceId);
     this.saveState();
   }
+
+  clearDisconnected() {
+    let removed = 0;
+    for (const [deviceId, state] of this.devices.entries()) {
+      if (!state.connected) {
+        this.devices.delete(deviceId);
+        removed += 1;
+      }
+    }
+    this.saveState();
+    return removed;
+  }
+
+  clearAll() {
+    const removed = this.devices.size;
+    this.devices.clear();
+    this.saveState();
+    return removed;
+  }
+
+  pruneToActive(activeIds) {
+    let removed = 0;
+    for (const deviceId of this.devices.keys()) {
+      if (!activeIds.has(deviceId)) {
+        this.devices.delete(deviceId);
+        removed += 1;
+      }
+    }
+    this.saveState();
+    return removed;
+  }
 }
 
 /**
@@ -176,24 +260,69 @@ class AppManager {
     const entries = fs.readdirSync(appsDir, { withFileTypes: true });
     for (const entry of entries) {
       if (entry.isDirectory()) {
-        const appPath = path.join(appsDir, entry.name, 'index.js');
-        const publicUiPath = path.join(appsDir, entry.name, 'public');
+        const appFolderPath = path.join(appsDir, entry.name);
+        const appPath = path.join(appFolderPath, 'index.js');
+        const manifestPath = path.join(appFolderPath, 'manifest.json');
+        const publicUiPath = path.join(appFolderPath, 'public');
         
+        let manifest = {};
+        if (fs.existsSync(manifestPath)) {
+          try {
+            manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+          } catch (err) {
+            console.error(`Error reading manifest for app ${entry.name}:`, err.message);
+          }
+        }
+
         if (fs.existsSync(appPath)) {
           try {
             // Clear require cache to allow hot reload on server restart
             delete require.cache[require.resolve(appPath)];
-            const app = require(appPath);
+            console.log(`[AppManager] Loading app: ${entry.name}`); // Logging which app is loading
+            const appInstance = require(appPath);
+            
             this.apps.set(entry.name, {
               id: entry.name,
+              name: manifest.name || entry.name,
+              description: manifest.description || '',
+              version: manifest.version || '1.0.0',
+              author: manifest.author || 'Unknown',
               enabled: true, // Default to enabled
-              instance: app,
+              instance: appInstance,
               hasPublicUI: fs.existsSync(publicUiPath),
-              ...app.metadata
+              ...appInstance.metadata,
+              manifest: manifest
             });
+
+            // If the app has an init method, run it with context
+            if (typeof appInstance.init === 'function') {
+              console.log(`[AppManager] Found init function for ${entry.name}. Calling it.`); // Logging the call
+              const context = {
+                app: app, // Provide express app for routing
+                onInput: (handler) => {
+                  const appEntry = this.apps.get(entry.name);
+                  if (appEntry) appEntry.inputHandler = handler.bind(appInstance);
+                },
+                sendToDevice: (deviceId, data) => {
+                  broadcastDevices({ appId: entry.name, ...data }, deviceId);
+                }
+              };
+              appInstance.init(context);
+            }
           } catch (err) {
             console.error(`Failed to load app ${entry.name}:`, err.message);
           }
+        } else if (fs.existsSync(publicUiPath)) {
+          // Pure UI apps (compatibility with some DeskThing patterns)
+          this.apps.set(entry.name, {
+            id: entry.name,
+            name: manifest.name || entry.name,
+            description: manifest.description || '',
+            version: manifest.version || '1.0.0',
+            enabled: true,
+            hasPublicUI: true,
+            manifest: manifest
+          });
         }
       }
     }
@@ -234,17 +363,25 @@ class AppManager {
   }
 
   /**
-   * Note: With nodemon, a server restart is required to apply app changes.
-   * This function is kept for potential future use or manual triggering.
+   * Reloads all apps from disk and broadcasts the change.
    */
   reloadApps() {
-    console.log('App reload requested. Please restart the server to apply changes.');
+    console.log('[AppManager] Reloading apps from disk...');
+    this.apps.clear();
+    this.loadApps();
   }
 
   handleInput(appId, deviceId, input) {
     const app = this.apps.get(appId);
-    if (app && app.enabled && app.instance.handleInput) {
-      return app.instance.handleInput(deviceId, input);
+    if (app && app.enabled) {
+      // Priority 1: New dynamic inputHandler from .init()
+      if (app.inputHandler) {
+        return app.inputHandler(input);
+      }
+      // Priority 2: Legacy static handleInput method
+      if (app.instance && typeof app.instance.handleInput === 'function') {
+        return app.instance.handleInput(deviceId, input);
+      }
     }
     return null;
   }
@@ -255,8 +392,6 @@ const persistenceManager = new PersistenceManager(DATA_DIR);
 const deviceManager = new DeviceStateManager(persistenceManager);
 const appManager = new AppManager(persistenceManager);
 
-// Express app
-const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
@@ -276,11 +411,113 @@ function mountAppUIs(expressApp, appManager) {
 }
 mountAppUIs(app, appManager);
 
+// ── ADB Auto-Provisioning ───────────────────────────────────────────────────
+/**
+ * Periodically checks for new ADB devices and fully provisions them.
+ * Retries provisioning while devices are still booting.
+ */
+function startADBPooling() {
+  const provisionedDevices = new Set();
+  const provisioningDevices = new Set();
+  const nextProvisionAttemptAt = new Map();
+  const nextMaintenanceAt = new Map();
+  const READ_ONLY_RETRY_MS = 60000;
+  const NORMAL_RETRY_MS = 10000;
+  const MAINTENANCE_INTERVAL_MS = 60000;
+  setInterval(async () => {
+    try {
+      const adbAvailable = await adbManager.checkADB();
+      if (!adbAvailable) return;
+
+      const devices = await adbManager.listDevices();
+      
+      // Clean up disconnected devices from our session set
+      for (const id of provisionedDevices) {
+        if (!devices.includes(id)) provisionedDevices.delete(id);
+      }
+      for (const id of provisioningDevices) {
+        if (!devices.includes(id)) provisioningDevices.delete(id);
+      }
+      for (const [id] of nextProvisionAttemptAt) {
+        if (!devices.includes(id)) nextProvisionAttemptAt.delete(id);
+      }
+      for (const [id] of nextMaintenanceAt) {
+        if (!devices.includes(id)) nextMaintenanceAt.delete(id);
+      }
+
+      for (const deviceId of devices) {
+        const nextAttemptTs = nextProvisionAttemptAt.get(deviceId) || 0;
+        if (Date.now() < nextAttemptTs) {
+          // Still cooling down from a recent provisioning failure.
+          await adbManager.suppressStockApp(deviceId).catch(() => {});
+          continue;
+        }
+
+        // Always suppress stock app while the device is connected.
+        await adbManager.suppressStockApp(deviceId).catch(() => {});
+
+        if (!provisionedDevices.has(deviceId) && !provisioningDevices.has(deviceId)) {
+          provisioningDevices.add(deviceId);
+          console.log(`[ADB] New device detected: ${deviceId}. Running full provisioning...`);
+          try {
+            await adbManager.setupDevice(deviceId, PORT);
+            provisionedDevices.add(deviceId);
+            nextProvisionAttemptAt.delete(deviceId);
+            nextMaintenanceAt.set(deviceId, Date.now() + MAINTENANCE_INTERVAL_MS);
+          } catch (err) {
+            console.warn(`[ADB] Auto-provision attempt failed for ${deviceId}; will retry: ${err.message}`);
+            const delay = String(err.message || '').includes('read-only')
+              ? READ_ONLY_RETRY_MS
+              : NORMAL_RETRY_MS;
+            nextProvisionAttemptAt.set(deviceId, Date.now() + delay);
+          } finally {
+            provisioningDevices.delete(deviceId);
+          }
+        } else if (provisionedDevices.has(deviceId)) {
+          const nextMaintTs = nextMaintenanceAt.get(deviceId) || 0;
+          if (Date.now() < nextMaintTs) continue;
+
+          // Periodic maintenance (throttled): refresh reverse/suppression, then validate files.
+          await adbManager.setupReverse(PORT, deviceId).catch(() => {});
+          await adbManager.suppressStockApp(deviceId).catch(() => {});
+
+          const ok = await adbManager.verifyProvisioning(deviceId);
+          if (!ok && !provisioningDevices.has(deviceId)) {
+            provisioningDevices.add(deviceId);
+            console.warn(`[ADB] Provisioning verification failed for ${deviceId}; re-provisioning...`);
+            try {
+              await adbManager.setupDevice(deviceId, PORT);
+              provisionedDevices.add(deviceId);
+              nextProvisionAttemptAt.delete(deviceId);
+            } catch (err) {
+              console.warn(`[ADB] Re-provision attempt failed for ${deviceId}; will retry: ${err.message}`);
+              provisionedDevices.delete(deviceId);
+              const delay = String(err.message || '').includes('read-only')
+                ? READ_ONLY_RETRY_MS
+                : NORMAL_RETRY_MS;
+              nextProvisionAttemptAt.set(deviceId, Date.now() + delay);
+            } finally {
+              provisioningDevices.delete(deviceId);
+            }
+          }
+
+          nextMaintenanceAt.set(deviceId, Date.now() + MAINTENANCE_INTERVAL_MS);
+        }
+      }
+    } catch (err) {
+      // ADB might be busy or restarting, ignore this cycle.
+    }
+  }, 5000); // 5-second poll
+}
+if (AUTO_PROVISION) {
+  console.log('[ADB] Auto-provision loop enabled (ST_AUTO_PROVISION=1).');
+  startADBPooling();
+} else {
+  console.log('[ADB] Auto-provision loop disabled. Use /ui -> Provision button or POST /api/admin/scan-devices.');
+}
+
 // Serve shared folder for frontend modules
 app.use('/shared', express.static(path.join(__dirname, '..', 'shared')));
-
-// HTTP server
-const server = http.createServer(app);
 
 // WebSocket server for devices
 const wssDevice = new WebSocketServer({ noServer: true });
@@ -297,6 +534,19 @@ const uiConnections = new Set();
 function broadcastUI(data) {
   const message = JSON.stringify(data);
   uiConnections.forEach(ws => {
+    if (ws.readyState === 1) { // WebSocket.OPEN
+      ws.send(message);
+    }
+  });
+}
+
+/**
+ * Broadcasts a message to all connected devices.
+ * @param {object} data The data to send.
+ */
+function broadcastDevices(data) {
+  const message = JSON.stringify(data);
+  deviceConnections.forEach(ws => {
     if (ws.readyState === 1) { // WebSocket.OPEN
       ws.send(message);
     }
@@ -356,10 +606,15 @@ wssUI.on('connection', (ws) => {
 wssDevice.on('connection', (ws, request) => {
   try {
     const deviceId = new URL(request.url, 'ws://localhost').searchParams.get('id') || `device-${Date.now()}`;
+    const clientInfo = parseClientInfo(request);
     console.log(`[Device] New device connection: ${deviceId}`);
     
+    const previous = deviceConnections.get(deviceId);
+    if (previous && previous !== ws) {
+      try { previous.close(); } catch {}
+    }
     deviceConnections.set(deviceId, ws);
-    deviceManager.updateDevice(deviceId, { connected: true });
+    deviceManager.updateDevice(deviceId, { connected: true, clientInfo });
     console.log(`[Device] Device ${deviceId} added to connections. Total devices: ${deviceConnections.size}`);
     
     broadcastUI({ type: MessageType.S2U_DEVICES_CHANGED });
@@ -368,7 +623,9 @@ wssDevice.on('connection', (ws, request) => {
     const initialMessage = {
       type: MessageType.S2D_CONNECTED,
       deviceId,
-      apps: appManager.getApps()
+      apps: appManager.getApps(),
+      serverTime: Date.now(),
+      serverTzOffset: new Date().getTimezoneOffset()
     };
     console.log(`[Device] Sending initial state to ${deviceId}:`, JSON.stringify(initialMessage));
     ws.send(JSON.stringify(initialMessage));
@@ -378,14 +635,89 @@ wssDevice.on('connection', (ws, request) => {
         const message = JSON.parse(data.toString());
         console.log(`[Device] Message from ${deviceId}:`, message.type);
         
+        // ── Hardware Input Bridge ───────────────────────────────────────────
+        // If this is the input-bridge, forward raw input to shell devices
+        if (deviceId === 'input-bridge' && message.type === 'input') {
+          console.log(`[Input Bridge] Forwarding input to shell devices:`, message);
+          deviceConnections.forEach((deviceWs, devId) => {
+            if (devId.startsWith('shell-') && deviceWs.readyState === 1) { // 1 = OPEN
+              deviceWs.send(JSON.stringify({
+                type: MessageType.S2D_INPUT,
+                keyCode: message.keyCode,
+                isPressed: message.isPressed
+              }));
+            }
+          });
+          return;
+        }
+        
         if (message.type === MessageType.D2S_INPUT) {
+          const input = message.input || message.data; // Backward compatibility
+
+          // ── System Hook: Hardware Controls ────────────────────────────────
+          if (input.type === 'SYS_COMMAND') {
+            const { command, value } = input;
+            console.log(`[Device] ${deviceId} requested system command: ${command}=${value}`);
+            
+            if (command === 'brightness') {
+              // Map deviceId (which might be our custom ID) to actual ADB ID if possible
+              // For now, we'll try to apply it to all connected ADB devices as a broadcast
+              // or find one that matches.
+              adbManager.listDevices().then(adbDevices => {
+                for (const adbId of adbDevices) {
+                  adbManager.setBrightness(value, adbId).catch(err => {
+                    console.error(`[ADB] Failed to set brightness on ${adbId}:`, err.message);
+                  });
+                }
+              });
+            }
+            if (command === 'auto_dim') {
+              const enabled = String(value) === '1' || String(value).toLowerCase() === 'true';
+              adbManager.listDevices().then(adbDevices => {
+                for (const adbId of adbDevices) {
+                  adbManager.setAutoDim(enabled, adbId).catch(err => {
+                    console.error(`[ADB] Failed to set auto-dim on ${adbId}:`, err.message);
+                  });
+                }
+              });
+            }
+            if (command === 'restart_chromium') {
+              adbManager.listDevices().then(adbDevices => {
+                for (const adbId of adbDevices) {
+                  adbManager.restartChromium(adbId).catch(err => {
+                    console.error(`[ADB] Failed to restart chromium on ${adbId}:`, err.message);
+                  });
+                }
+              });
+            }
+            if (command === 'reboot') {
+              adbManager.listDevices().then(adbDevices => {
+                for (const adbId of adbDevices) {
+                  adbManager.rebootDevice(adbId).catch(err => {
+                    console.error(`[ADB] Failed to reboot ${adbId}:`, err.message);
+                  });
+                }
+              });
+            }
+            if (command === 'repair_clientthing') {
+              adbManager.listDevices().then(adbDevices => {
+                for (const adbId of adbDevices) {
+                  adbManager.repairClientThing(adbId).catch(err => {
+                    console.error(`[ADB] Failed to repair ClientThing on ${adbId}:`, err.message);
+                  });
+                }
+              });
+            }
+            return; // Don't forward system commands to apps
+          }
+
           // Store input event
-          deviceManager.addInput(deviceId, message.data);
+          deviceManager.addInput(deviceId, input);
           
           // Broadcast to all enabled apps
           const apps = appManager.getApps().filter(app => app.enabled);
           for (const app of apps) {
-            const response = appManager.handleInput(app.id, deviceId, message.data);
+            const response = appManager.handleInput(app.id, deviceId, input);
             if (response) {
               ws.send(JSON.stringify({
                 type: MessageType.S2D_APP_RESPONSE,
@@ -408,7 +740,10 @@ wssDevice.on('connection', (ws, request) => {
 
     ws.on('close', () => {
       console.log(`[Device] Device disconnected: ${deviceId}`);
-      deviceConnections.delete(deviceId);
+      // If a newer WS already replaced this deviceId, don't remove it.
+      if (deviceConnections.get(deviceId) === ws) {
+        deviceConnections.delete(deviceId);
+      }
       deviceManager.updateDevice(deviceId, { connected: false });
       broadcastUI({ type: MessageType.S2U_DEVICES_CHANGED });
     });
@@ -427,9 +762,123 @@ app.get('/api/devices', (req, res) => {
   res.json(deviceManager.getAllDevices());
 });
 
+app.get('/api/adb/devices', async (req, res) => {
+  try {
+    const devices = await adbManager.listDevices();
+    res.json({ devices });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Failed to list ADB devices' });
+  }
+});
+
+app.post('/api/devices/clear', (req, res) => {
+  const mode = (req.body && req.body.mode) || 'disconnected';
+  const activeIds = new Set(
+    Array.from(deviceConnections.entries())
+      .filter(([, ws]) => ws && ws.readyState === 1)
+      .map(([id]) => id)
+  );
+  const removed = mode === 'all'
+    ? deviceManager.clearAll()
+    : deviceManager.pruneToActive(activeIds);
+  broadcastUI({ type: MessageType.S2U_DEVICES_CHANGED });
+  res.json({ success: true, removed, mode, active: activeIds.size });
+});
+
 app.get('/api/apps', (req, res) => {
   res.json(appManager.getApps());
 });
+
+function forwardInputToShellDevices(keyCode, isPressed) {
+  deviceConnections.forEach((ws, devId) => {
+    if (devId.startsWith('shell-') && ws.readyState === 1) { // 1 = OPEN
+      ws.send(JSON.stringify({
+        type: MessageType.S2D_INPUT,
+        keyCode,
+        isPressed
+      }));
+    }
+  });
+}
+
+app.post('/api/input', (req, res) => {
+  // Hardware input from on-device input bridge
+  const { deviceId, keyCode, isPressed } = req.body;
+  
+  if (!deviceId || keyCode === undefined || isPressed === undefined) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+  
+  console.log(`[Input Bridge] Received input: keyCode=${keyCode}, isPressed=${isPressed}`);
+  
+  // Broadcast to all shell devices
+  forwardInputToShellDevices(keyCode, isPressed);
+  
+  res.json({ success: true });
+});
+
+app.post('/api/input/batch', (req, res) => {
+  const { deviceId, events } = req.body || {};
+  if (!deviceId || !Array.isArray(events) || events.length === 0) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  const maxBatch = 64;
+  const accepted = events.slice(0, maxBatch);
+  if (accepted.length !== events.length) {
+    console.warn(`[Input Bridge] Batch truncated ${events.length} -> ${accepted.length}`);
+  }
+
+  for (const evt of accepted) {
+    if (evt.keyCode === undefined || evt.isPressed === undefined) continue;
+    forwardInputToShellDevices(evt.keyCode, evt.isPressed);
+  }
+
+  res.json({ success: true, accepted: accepted.length });
+});
+
+app.post('/api/input/health', (req, res) => {
+  const { deviceId, queueSize, monitorCount, stats } = req.body || {};
+  if (!deviceId) {
+    return res.status(400).json({ error: 'Missing deviceId' });
+  }
+  latestInputBridgeHealth = {
+    deviceId,
+    queueSize: Number(queueSize || 0),
+    monitorCount: Number(monitorCount || 0),
+    stats: stats || {},
+    receivedAt: Date.now(),
+  };
+  // Low-noise heartbeat log; details still available for debugging.
+  if (queueSize > 32 || (stats && stats.sendFailures > 0)) {
+    console.warn(`[Input Bridge] Health warn device=${deviceId} queue=${queueSize} monitors=${monitorCount}`);
+  }
+  res.json({ success: true });
+});
+
+app.get('/api/input/health', (req, res) => {
+  res.json({
+    ok: true,
+    health: latestInputBridgeHealth,
+    now: Date.now(),
+  });
+});
+
+app.post('/api/apps/reload', (req, res) => {
+  appManager.reloadApps();
+  broadcastUI({ type: MessageType.S2U_APPS_CHANGED });
+  broadcastDevices({ type: MessageType.S2D_APPS_RELOADED, apps: appManager.getApps() });
+  res.json({ success: true, message: 'Apps reloaded' });
+});
+
+// Periodic Time Sync to devices
+setInterval(() => {
+  broadcastDevices({
+    type: MessageType.S2D_TIME_SYNC,
+    serverTime: Date.now(),
+    serverTzOffset: new Date().getTimezoneOffset()
+  });
+}, 60000); // Every minute
 
 app.post('/api/apps/:appId/enable', (req, res) => {
   const { appId } = req.params;
@@ -437,13 +886,9 @@ app.post('/api/apps/:appId/enable', (req, res) => {
     res.json({ success: true, message: `App ${appId} enabled` });
     
     // Notify all connected devices
-    deviceConnections.forEach(ws => {
-      if (ws.readyState === 1) { // WebSocket.OPEN
-        ws.send(JSON.stringify({
-          type: MessageType.S2D_APP_ENABLED,
-          appId
-        }));
-      }
+    broadcastDevices({
+      type: MessageType.S2D_APP_ENABLED,
+      appId
     });
     broadcastUI({ type: MessageType.S2U_APPS_CHANGED });
   } else {
@@ -457,13 +902,9 @@ app.post('/api/apps/:appId/disable', (req, res) => {
     res.json({ success: true, message: `App ${appId} disabled` });
     
     // Notify all connected devices
-    deviceConnections.forEach(ws => {
-      if (ws.readyState === 1) { // WebSocket.OPEN
-        ws.send(JSON.stringify({
-          type: MessageType.S2D_APP_DISABLED,
-          appId
-        }));
-      }
+    broadcastDevices({
+      type: MessageType.S2D_APP_DISABLED,
+      appId
     });
     broadcastUI({ type: MessageType.S2U_APPS_CHANGED });
   } else {
@@ -511,6 +952,49 @@ app.post('/api/apps/install', upload.single('app-zip'), (req, res) => {
     }
     res.status(500).json({ success: false, message: 'Failed to extract or install app.' });
   }
+});
+
+// --- Admin API Routes ---
+
+/**
+ * Scan for connected ADB devices and attempt setup.
+ */
+app.post('/api/admin/scan-devices', async (req, res) => {
+  try {
+    const isAdbAvailable = await adbManager.checkADB();
+    if (!isAdbAvailable) {
+      return res.status(500).json({ error: 'ADB not found on server. Please install platform-tools.' });
+    }
+
+    const deviceIds = await adbManager.listDevices();
+    const results = [];
+
+    for (const id of deviceIds) {
+      try {
+        const url = await adbManager.setupDevice(id, PORT);
+        results.push({ id, status: 'success', serverURL: url });
+      } catch (err) {
+        results.push({ id, status: 'error', error: err.message });
+      }
+    }
+
+    res.json({ devices: results });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Get system status (ADB, IP, etc.)
+ */
+app.get('/api/admin/status', async (req, res) => {
+  const adbAvailable = await adbManager.checkADB();
+  res.json({
+    adbAvailable,
+    localIP: adbManager.getLocalIP(),
+    serverPort: PORT,
+    platform: os.platform()
+  });
 });
 
 // Start server

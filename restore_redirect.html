@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ServerThing Redirect</title>
+    <style>
+        body { background: #121212; color: white; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; font-family: sans-serif; }
+    </style>
+</head>
+<body>
+    <div id="status">Connecting to ServerThing...</div>
+    <script>
+        setTimeout(() => {
+            window.location.replace('http://127.0.0.1:3000/shell/index.html');
+        }, 1000);
+    </script>
+</body>
+</html>

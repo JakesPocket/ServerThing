@@ -1,0 +1,17 @@
+.git
+.github
+node_modules
+npm-debug.log*
+.DS_Store
+
+# Local/dev artifacts
+references
+firmware
+appstart.png
+appstart-custom.html
+redirect*.html
+restore_redirect.html
+
+# Editor / platform files
+.vscode
+.idea

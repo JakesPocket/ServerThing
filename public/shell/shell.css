@@ -1,30 +1,72 @@
-/* System UI Shell - Optimized for 800x480 Car Thing Display */
+/* System UI Shell — Resolution-Independent Layout
+   Targets: Spotify Car Thing (800×480), Tablets, Smartphones.
+   Base unit: 1 rem. Root font-size is set by the scaling hook in shell.js. */
 
-:root {
-  --shell-width: 800px;
-  --shell-height: 480px;
-  --status-bar-height: 40px;
-  --accent: #007aff;
-  
-  /* Interaction Variables - Default to Dial Mode */
-  --focus-border-opacity: 1.0;
-  --focus-scale: 1.05;
-  --focus-shadow: 0 0 20px rgba(29, 185, 84, 0.5);
+/* ─── Scaling Baseline ─────────────────────────────────────────────────────── */
+html {
+  /* Default: Car Thing (800×480, low-PPI).  Overridden by JS for other devices. */
+  font-size: 18px;
 }
 
-/* Interaction Mode Overrides */
+:root {
+  /* Layout */
+  --status-bar-height: 2.75rem;      /* Slightly taller status bar */
+  --grid-columns: 4;
+  --grid-rows: 3;
+  --grid-gap: 0.75rem;
+  --grid-pad: 1rem;
+
+  /* Accent / brand */
+  --accent: #007aff;
+  --focus-color: #ffffff;
+  --muted-opacity: 0.5;
+
+  /* Icon tile */
+  --icon-tile-size:   4rem;
+  --icon-tile-radius: 1.125rem;
+  --icon-glyph-size:  2.5rem;
+  --icon-default-bg:  #2d2d2d;
+  --icon-default-fg:  #ffffff;
+
+  /* Material Symbols — variable-font axes */
+  --sym-weight:       400;
+  --sym-grade:        0;
+  --sym-opsz:         24;
+  --sym-weight-focus: 700;
+  --sym-grade-focus:  200;
+
+  /* Focus / dial */
+  --focus-ring-width:   0.1875rem;
+  --focus-border-opacity: 1.0;
+  --focus-shadow:       none;
+
+  /* Status bar */
+  --status-bg:      #000;
+  --status-fg:      #fff;
+  --status-border:  #222;
+  --status-nav-dim: 0.35;
+
+  /* Label */
+  --label-size: 0.75rem;
+
+  /* ─── UI Bridge Tokens (injected into iframes) ──────────────────────── */
+  --st-highlight-bg:     #ffffff;
+  --st-muted-opacity:    0.5;
+  --st-transition-speed: 0.1s;
+}
+
+/* ─── Interaction Mode Overrides ───────────────────────────────────────────── */
 body[data-interaction-mode="touch"] {
-  --focus-border-opacity: 0.15;
-  --focus-scale: 1.0;
+  --focus-border-opacity: var(--muted-opacity);
   --focus-shadow: none;
 }
 
 body[data-interaction-mode="dial"] {
   --focus-border-opacity: 1.0;
-  --focus-scale: 1.05;
-  --focus-shadow: 0 0 20px rgba(29, 185, 84, 0.5);
+  --focus-shadow: none;
 }
 
+/* ─── Reset ────────────────────────────────────────────────────────────────── */
 * {
   margin: 0;
   padding: 0;
@@ -32,8 +74,8 @@ body[data-interaction-mode="dial"] {
 }
 
 html, body {
-  width: var(--shell-width);
-  height: var(--shell-height);
+  width: 100vw;
+  height: 100vh;
   overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background: #000;
@@ -41,6 +83,8 @@ html, body {
   user-select: none;
   -webkit-user-select: none;
   -webkit-tap-highlight-color: transparent;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 #shell-container {
@@ -48,64 +92,90 @@ html, body {
   height: 100%;
   display: flex;
   flex-direction: column;
+  /* Respect notches / safe-areas on modern phones */
+  padding-top: env(safe-area-inset-top, 0);
+  padding-left: env(safe-area-inset-left, 0);
+  padding-right: env(safe-area-inset-right, 0);
 }
 
-/* Status Bar */
+/* ─── Status Bar ───────────────────────────────────────────────────────────── */
 #status-bar {
   height: var(--status-bar-height);
-  background: #000;
-  border-bottom: 1px solid #222;
+  background: var(--status-bg);
+  border-bottom: 0.0625rem solid var(--status-border);
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  padding: 0 10px;
-  font-size: 16px;
+  padding: 0 0.625rem;
+  font-size: 1rem;
   flex-shrink: 0;
   z-index: 1000;
 }
 
-.status-bar-center {
-  text-align: center;
+/* Hide status bar while an app is open for full-screen app mode. */
+body.app-open #status-bar {
+  display: none;
 }
 
-.status-bar-right {
+.status-bar-center { text-align: center; }
+.status-bar-right  {
   text-align: right;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 100%;
 }
 
-#sys-nav-button {
+#sys-nav-button,
+#sys-settings-button {
   background: none;
   border: none;
-  color: #fff;
-  font-size: 28px;
-  font-weight: 300;
-  padding: 0 15px;
+  color: var(--status-fg);
+  padding: 0 0.5rem;
   cursor: pointer;
-  min-width: 60px;
-  text-align: center;
+  /* Fit inside status bar with room for focus outline */
+  min-width: 2.5rem;
+  height: calc(var(--status-bar-height) - 0.625rem);
+  max-height: calc(var(--status-bar-height) - 0.625rem);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.375rem;
+  transition: background 0.15s ease, opacity 0.2s ease;
+  outline: none;
+}
+
+#sys-nav-button .material-symbols-outlined,
+#sys-settings-button .material-symbols-outlined {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+#sys-nav-button.focused,
+#sys-settings-button.focused {
+  background: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 0 0 calc(var(--focus-ring-width) / 2) var(--accent);
+}
+
+#sys-settings-button.focused {
+  box-shadow: 0 0 0 calc(var(--focus-ring-width) / 2) #fff;
+}
+
+#sys-nav-button.at-root {
+  opacity: 1;
 }
 
 #sys-nav-button:active {
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.15);
 }
 
 #status-time {
   font-variant-numeric: tabular-nums;
   font-weight: 500;
+  font-size: 1.125rem;
 }
 
-#status-connection {
-  color: #555;
-  font-size: 12px;
-  min-width: 60px;
-  text-align: right;
-}
-
-#status-connection.connected {
-  color: #0f0;
-}
-
-/* App Viewport */
+/* ─── App Viewport ─────────────────────────────────────────────────────────── */
 #app-viewport {
   flex: 1;
   position: relative;
@@ -114,13 +184,13 @@ html, body {
 
 .screen {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.3s ease;
+  /* Compositor-friendly: promote to own layer */
+  will-change: opacity;
 }
 
 .screen.active {
@@ -128,53 +198,206 @@ html, body {
   pointer-events: all;
 }
 
-/* Home Screen / Launcher */
+/* ─── Home Screen / Launcher ───────────────────────────────────────────────── */
 #home-screen {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   background: #000;
-  padding: 20px;
+  padding: var(--grid-pad);
+  /* fill available height below status bar */
+  height: calc(100vh - var(--status-bar-height) - env(safe-area-inset-top, 0px));
 }
 
+/* ─── 4 × 3 Icon Grid ─────────────────────────────────────────────────────── */
 #app-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 25px;
+  grid-template-columns: repeat(var(--grid-columns), 1fr);
+  grid-template-rows: repeat(var(--grid-rows), 1fr);
+  gap: var(--grid-gap);
   width: 100%;
-  max-width: 720px;
-  padding: 0 20px;
+  max-width: 50rem;
+  /* Let the grid consume remaining vertical space */
+  flex: 1;
+  align-content: center;
+  place-items: center;
 }
 
-.app-card {
-  background: #1c1c1e;
-  border: 3px solid transparent;
-  border-radius: 16px;
-  padding: 20px;
-  text-align: center;
+/* ─── Grid Cell ────────────────────────────────────────────────────────────── */
+.app-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
   cursor: pointer;
-  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
+  /* Keep dial outline on the cell for accessibility */
+  outline: none;
 }
 
-/* The Reactive Highlight */
-.app-card.focused {
-  border-color: rgba(29, 185, 84, var(--focus-border-opacity));
+/* ─── Icon Wrapper (the "squircle") ────────────────────────────────────────── */
+.icon-wrapper {
+  width: var(--icon-tile-size);
+  height: var(--icon-tile-size);
+  aspect-ratio: 1 / 1;
+  border-radius: var(--icon-tile-radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--icon-default-bg);
+  color: var(--icon-default-fg);
+  border: var(--focus-ring-width) solid transparent;
+  transition: border-color 0.15s ease,
+              font-variation-settings 0.15s ease;
+  /* Compositor layer promotion for smooth focus transitions */
+  will-change: border-color, opacity;
+  position: relative;
+  overflow: hidden;
+}
+
+.fallback-icon {
+  font-size: calc(var(--icon-tile-size) * 0.55);
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  z-index: 2;
+  position: relative;
+  color: inherit;
+}
+
+.icon-wrapper .material-symbols-outlined {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: var(--icon-glyph-size);
+  line-height: 1;
+  font-family: 'Material Symbols Outlined', sans-serif;
+  /* Variable font — default axes */
+  font-variation-settings:
+    'wght' var(--sym-weight),
+    'GRAD' var(--sym-grade),
+    'opsz' var(--sym-opsz);
+  /* Hidden until the font is confirmed loaded */
+  display: none;
+  visibility: hidden;
+}
+
+/* ─── Label ────────────────────────────────────────────────────────────────── */
+.label-text {
+  font-size: var(--label-size);
+  font-weight: 400;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.7);
+  /* 18 characters + breathing room */
+  max-width: 18ch;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  transition: color 0.2s ease;
+}
+
+/* ─── Focus States ─────────────────────────────────────────────────────────── */
+.app-cell.focused .icon-wrapper {
+  border-color: rgba(255, 255, 255, var(--focus-border-opacity));
   box-shadow: var(--focus-shadow);
-  transform: scale(var(--focus-scale));
+  /* No scale — geometric stability. Weight shift only. */
+  font-variation-settings:
+    'wght' var(--sym-weight-focus),
+    'GRAD' var(--sym-grade-focus),
+    'opsz' var(--sym-opsz);
 }
 
-.app-card:active, .app-card.pressed {
-  background: #3a3a3c;
-  transform: scale(0.97);
+.app-cell.focused .label-text {
+  color: #fff;
+  /* No font-weight change — keeps typography static, prevents layout reflow */
+  overflow: visible;
+  max-width: none;
 }
 
-.app-card-name {
-  font-size: 18px;
-  font-weight: 600;
+/* Dial-specific: no extra glow */
+
+/* Muted state — touch tapped but transitioning */
+.app-cell.muted .icon-wrapper {
+  border-color: rgba(255, 255, 255, var(--muted-opacity));
+  box-shadow: none;
 }
 
-/* App Container */
+.app-cell.muted .label-text {
+  color: rgba(255, 255, 255, var(--muted-opacity));
+}
+
+/* ─── Status Bar Focus States ──────────────────────────────────────────────── */
+#sys-nav-button.focused {
+  background: rgba(255, 255, 255, 0.12);
+  outline: var(--focus-ring-width) solid rgba(255, 255, 255, var(--focus-border-opacity));
+  outline-offset: -0.0625rem;
+  opacity: 1;
+}
+
+#sys-nav-button.muted {
+  outline: var(--focus-ring-width) solid rgba(255, 255, 255, var(--muted-opacity));
+  outline-offset: -0.0625rem;
+  opacity: 1;
+}
+
+/* Press / active — no scale, just dim */
+.app-cell:active .icon-wrapper,
+.app-cell.pressed .icon-wrapper {
+  opacity: 0.7;
+}
+
+/* ─── Material Symbols — Prevent FOIT ──────────────────────────────────────── */
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined', sans-serif;
+  font-display: swap;
+  visibility: hidden; /* Hide keywords if font fails to load */
+}
+
+/* When the font is available, swap from the fallback initial to the glyph */
+body.material-font-loaded .icon-wrapper .material-symbols-outlined {
+  display: block;
+  visibility: visible;
+}
+
+body.material-font-loaded .fallback-icon {
+  display: none;
+}
+
+body.material-font-loaded .material-symbols-outlined {
+  visibility: visible;
+}
+
+/* Defensive: never show ligature text if the font fails to load */
+body:not(.material-font-loaded) .material-symbols-outlined {
+  display: none;
+  visibility: hidden;
+}
+
+.shell-icon {
+  width: 1.5rem;
+  height: 1.5rem;
+  fill: currentColor;
+  flex-shrink: 0;
+  display: block;
+}
+
+.shell-icon.sm {
+  width: 1.125rem;
+  height: 1.125rem;
+}
+
+/* ─── Hint text ────────────────────────────────────────────────────────────── */
+.hint {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.35);
+  margin-top: 0.5rem;
+}
+
+/* ─── App Container (iframes) ──────────────────────────────────────────────── */
 #app-container iframe {
   width: 100%;
   height: 100%;
@@ -182,6 +405,27 @@ html, body {
   display: block;
 }
 
+/* ─── Standardised Selectable (Shell-side reference) ──────────────────────── */
+.st-selectable {
+  transform: none !important;
+  font-weight: inherit !important;
+  transition: opacity var(--st-transition-speed) ease,
+              outline var(--st-transition-speed) ease;
+}
+
+.st-selectable.st-focused {
+  outline: var(--focus-ring-width) solid var(--st-highlight-bg);
+  outline-offset: 0.125rem;
+  opacity: 1;
+}
+
+.st-selectable.st-muted {
+  outline: var(--focus-ring-width) solid rgba(255, 255, 255, var(--st-muted-opacity));
+  outline-offset: 0.125rem;
+  opacity: var(--st-muted-opacity);
+}
+
+/* ─── Loading ──────────────────────────────────────────────────────────────── */
 #loading {
   position: fixed;
   top: 0; left: 0;
@@ -193,12 +437,352 @@ html, body {
 }
 
 .spinner {
-  width: 40px; height: 40px;
-  border: 4px solid rgba(255, 255, 255, 0.1);
+  width: 2.5rem; height: 2.5rem;
+  border: 0.25rem solid rgba(255, 255, 255, 0.1);
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
 
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ─── Disconnect Screen ───────────────────────────────────────────────────── */
+#disconnect-screen {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  min-width: 100vw;
+  min-height: 100vh;
+  background: #0a0a0a;
+  z-index: 3200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.disconnect-content {
+  animation: fade-in-up 0.3s ease-out;
+}
+
+#disconnect-screen .client-icon {
+  width: 320px;
+  height: 260px;
+  margin: 0 auto 22px;
+  display: block;
+}
+
+#disconnect-screen .device-outline {
+  fill: #141b26;
+  stroke: #4a9eff;
+  stroke-width: 3;
+}
+
+#disconnect-screen .device-screen {
+  fill: #335d90;
+}
+
+#disconnect-screen .device-tablet {
+  stroke: #6bb6ff;
+}
+
+#disconnect-screen .device-phone {
+  stroke: #4a9eff;
+}
+
+#disconnect-screen .device-led {
+  fill: #4a9eff;
+  opacity: 0.3;
+  transform-origin: center;
+  animation: device-led-blink 1.2s ease-in-out infinite;
+}
+
+#disconnect-screen .device-led.l1 { fill: #4a9eff; animation-delay: 0s; }
+#disconnect-screen .device-led.l2 { fill: #6bb6ff; animation-delay: 0.24s; }
+#disconnect-screen .device-led.l3 { fill: #53d37e; animation-delay: 0.48s; }
+
+#disconnect-screen h2 {
+  font-size: 48px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  line-height: 1;
+  margin-bottom: 16px;
+}
+
+.disconnect-title {
+  margin-top: 0;
+  color: #d0d0d0;
+  font-size: 24px;
+}
+
+.disconnect-status {
+  margin-top: 8px;
+  color: #7f8793;
+  font-size: 24px;
+}
+
+.dot-pulse {
+  display: inline-block;
+  animation: text-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes device-led-blink {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 1; }
+}
+
+@keyframes text-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(-0.5rem); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .hidden { display: none !important; }
+
+/* ─── Settings Overlay ─────────────────────────────────────────────────── */
+#settings-overlay {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(0, 0, 0, 0.85);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(0.625rem);
+  -webkit-backdrop-filter: blur(0.625rem);
+}
+
+#settings-overlay.hidden {
+  display: none !important;
+}
+
+.settings-panel {
+  background: #1a1a1a;
+  width: min(34rem, 92vw);
+  max-height: calc(100vh - 1.5rem);
+  border-radius: 1.25rem;
+  padding: 1.25rem 1.25rem 1rem;
+  border: 0.0625rem solid #333;
+  box-shadow: 0 0.625rem 2.5rem rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.settings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.85rem;
+  flex-shrink: 0;
+}
+
+.settings-header h3 {
+  font-weight: 600;
+  font-size: 1.35rem;
+}
+
+.settings-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 0.35rem;
+}
+
+.close-btn {
+  background: #333;
+  border: none;
+  color: #fff;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.close-btn:active {
+  background: #444;
+}
+
+#settings-overlay:not(.hidden) ~ #app-viewport {
+  filter: grayscale(0.2) brightness(0.5);
+}
+
+.setting-item {
+  margin-bottom: 1rem;
+}
+
+.setting-item label {
+  display: block;
+  font-size: 1.05rem;
+  color: #b5b5b5;
+  margin-bottom: 0.75rem;
+}
+
+.setting-value {
+  float: right;
+  font-variant-numeric: tabular-nums;
+  color: #8a8a8a;
+}
+
+.slider-container {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+#brightness-slider {
+  flex: 1;
+  accent-color: var(--accent);
+  cursor: pointer;
+  height: 1.5rem;
+}
+
+/* Bigger slider affordance for touch on Chromium */
+#brightness-slider::-webkit-slider-runnable-track {
+  height: 0.5rem;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 0.5rem;
+}
+
+#brightness-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background: #fff;
+  border: 0.1875rem solid rgba(0, 0, 0, 0.25);
+  margin-top: -0.5rem;
+}
+
+#brightness-slider:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.toggle-container {
+  display: flex;
+  justify-content: flex-end;
+}
+
+#auto-dim-toggle,
+#mic-toggle {
+  width: 1.5rem;
+  height: 1.5rem;
+  accent-color: var(--accent);
+}
+
+.setting-item.diagnostics {
+  margin-top: 0.25rem;
+}
+
+.diagnostics-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 0.0625rem solid #2f2f2f;
+  color: #c6cfdb;
+  border-radius: 0.625rem;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.diag-caret {
+  transition: transform 0.15s ease;
+}
+
+.setting-item.diagnostics:not(.collapsed) .diag-caret {
+  transform: rotate(90deg);
+}
+
+.diagnostics-grid {
+  display: grid;
+  gap: 0.35rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 0.0625rem solid #2f2f2f;
+  border-radius: 0.625rem;
+  padding: 0.65rem 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.setting-item.diagnostics.collapsed .diagnostics-grid {
+  display: none;
+}
+
+.diag-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.9rem;
+  color: #9ea6b2;
+}
+
+.diag-row span:last-child {
+  font-variant-numeric: tabular-nums;
+  color: #d4d9e0;
+}
+
+/* Settings actions (reboot / restart chromium) */
+.settings-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 0.0625rem solid #2a2a2a;
+  flex-shrink: 0;
+}
+
+.settings-action-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.875rem 0.75rem;
+  border-radius: 0.875rem;
+  border: 0.0625rem solid #333;
+  background: #222;
+  color: #fff;
+  font-size: 1.05rem;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.settings-action-btn .material-symbols-outlined {
+  font-size: 1.4rem;
+  line-height: 1;
+}
+
+.settings-action-btn:active {
+  background: #2a2a2a;
+}
+
+.settings-action-btn.danger {
+  border-color: rgba(255, 90, 90, 0.35);
+  background: rgba(255, 60, 60, 0.14);
+}
+
+.settings-action-btn.danger:active {
+  background: rgba(255, 60, 60, 0.22);
+}

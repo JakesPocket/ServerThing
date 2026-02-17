@@ -15,7 +15,22 @@ module.exports = {
     version: '1.0.0'
   },
 
-  // Optional: Handle device input events
+  // Recommended: Initialization hook
+  init({ app, onInput, sendToDevice }) {
+    // app: The Express app instance (for routes)
+    // onInput: Register a callback for device input
+    // sendToDevice: Broadcast messages back to devices
+
+    onInput((input) => {
+      console.log('App received input:', input);
+    });
+
+    app.get('/apps/my-app/data', (req, res) => {
+      res.json({ message: 'Hello from ServerThing!' });
+    });
+  },
+
+  // Legacy (Optional): Handle device input events
   handleInput(deviceId, input) {
     // input.type: 'button', 'dial', or 'touch'
     // input.value: button value, dial direction, or touch gesture

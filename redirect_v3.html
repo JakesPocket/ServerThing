@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ServerThing Redirect</title>
+    <style>
+        body { background: #121212; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; font-family: sans-serif; }
+        .version { font-size: 10px; color: #444; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <div id="status">Targeting 127.0.0.1:3000...</div>
+    <div class="version">V3-CACHE-BUST</div>
+    <script>
+        console.log("Redirect V3 started");
+        setTimeout(() => {
+            var target = 'http://127.0.0.1:3000/shell/index.html?t=' + Date.now();
+            document.getElementById('status').innerText = 'Loading Shell...';
+            window.location.replace(target);
+        }, 1000);
+    </script>
+</body>
+</html>

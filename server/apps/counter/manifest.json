@@ -1,0 +1,10 @@
+{
+  "id": "counter",
+  "name": "Live Counter",
+  "description": "A simple counter app for ServerThing.",
+  "version": "1.0.0",
+  "author": "ServerThing Team",
+  "platforms": ["carthing", "simulator"],
+  "entry": "index.js",
+  "icon": "icon.png"
+}

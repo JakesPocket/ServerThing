@@ -1,7 +1,7 @@
 // public/ui/ui.js
 
 import { MessageType } from '/shared/protocol.js';
-import { loadDevices } from './components/devices.js';
+import { loadDevices, initDeviceControls } from './components/devices.js';
 import { loadApps, initAppInstaller } from './components/apps.js';
 import { initSimulator } from './components/simulator.js';
 
@@ -40,6 +40,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadApps();
   initSimulator();
   initAppInstaller();
+  initDeviceControls();
   
   connectUI();
 });

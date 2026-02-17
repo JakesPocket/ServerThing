@@ -1,0 +1,108 @@
+name: Build ClientThing Firmware
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/build-clientthing-firmware.yml"
+      - "firmware/clientthing.nix"
+      - "CarThingRootDir/home/clientthing/**"
+
+jobs:
+  build-firmware:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install QEMU binfmt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static binfmt-support zip
+          sudo update-binfmts --enable qemu-aarch64 || true
+
+      - name: Clone nixos-superbird
+        run: |
+          rm -rf references/nixos-superbird
+          git clone --depth 1 https://github.com/JoeyEamigh/nixos-superbird references/nixos-superbird
+
+      - name: Stage ClientThing overlay
+        run: |
+          mkdir -p references/nixos-superbird/examples/clientthing-assets
+          cp CarThingRootDir/home/clientthing/shell-bootstrap.html references/nixos-superbird/examples/clientthing-assets/shell-bootstrap.html
+          cp CarThingRootDir/home/clientthing/appstart.png references/nixos-superbird/examples/clientthing-assets/appstart.png
+          cp CarThingRootDir/home/clientthing/input-bridge.js references/nixos-superbird/examples/clientthing-assets/input-bridge.js
+          cp firmware/clientthing.nix references/nixos-superbird/examples/clientthing.nix
+
+          python3 - <<'PY'
+          from pathlib import Path
+          flake = Path("references/nixos-superbird/examples/flake/flake.nix")
+          text = flake.read_text()
+          needle = "            nixos-superbird.nixosModules.superbird\n"
+          add = "            ./../clientthing.nix\n"
+          if add not in text:
+            text = text.replace(needle, needle + add)
+          # Disable any upstream GUI selections so only clientthing.nix provides one GUI mode.
+          cleaned = []
+          for line in text.splitlines():
+            if "superbird.gui." in line and "=" in line and not line.lstrip().startswith("#"):
+              continue
+            cleaned.append(line)
+          text = "\n".join(cleaned) + "\n"
+          flake.write_text(text)
+          print("Patched flake modules for clientthing.nix")
+          PY
+
+          # Nix flakes only see tracked files in git repos.
+          git -C references/nixos-superbird add \
+            examples/clientthing.nix \
+            examples/clientthing-assets/shell-bootstrap.html \
+            examples/clientthing-assets/appstart.png \
+            examples/clientthing-assets/input-bridge.js \
+            examples/flake/flake.nix
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            extra-platforms = aarch64-linux
+
+      - name: Build installer
+        working-directory: references/nixos-superbird/examples/flake
+        run: |
+          nix --version
+          nix build '.#nixosConfigurations.superbird.config.system.build.installer' --show-trace --print-build-logs
+
+      - name: Prepare firmware bundle
+        working-directory: references/nixos-superbird/examples/flake
+        run: |
+          rm -rf out clientthing-superbird-firmware.zip
+          mkdir -p out
+          cp -rL result/* out/
+          sudo chown -R "$USER:$USER" out
+
+          if [ -x out/scripts/make-bootfs.sh ]; then
+            sudo out/scripts/make-bootfs.sh
+          fi
+
+          (
+            cd out
+            zip -r ../clientthing-superbird-firmware.zip .
+          )
+
+      - name: Upload firmware zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: clientthing-superbird-firmware-zip
+          path: references/nixos-superbird/examples/flake/clientthing-superbird-firmware.zip
+          if-no-files-found: error
+
+      - name: Upload raw build output
+        uses: actions/upload-artifact@v4
+        with:
+          name: clientthing-superbird-firmware-out
+          path: references/nixos-superbird/examples/flake/out
+          if-no-files-found: error

@@ -1,0 +1,11 @@
+{
+  "id": "spotify",
+  "name": "Spotify Player",
+  "description": "Ported Spotify integration for ServerThing.",
+  "version": "1.0.0",
+  "author": "ServerThing Port",
+  "platforms": ["carthing", "simulator"],
+  "entry": "index.js",
+  "icon": "icon.png",
+  "homepage": "https://github.com/ItsRiprod/Deskthing-Apps/tree/main/spotify"
+}
