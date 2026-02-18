@@ -63,22 +63,24 @@ class ADBManager {
       // 2. Setup port reversal so device can hit localhost:serverPort
       await this.setupReverse(serverPort, deviceId);
 
-      // 3. Push ClientThing runtime assets from CarThingRootDir staging.
+      // 3. Push ClientThing runtime assets from local device staging.
       const path = require('path');
-      const clientThingDir = path.join(__dirname, '..', 'CarThingRootDir', 'home', 'clientthing');
-      const startupPath = path.join(clientThingDir, 'shell-bootstrap.html');
-      const splashPath = path.join(clientThingDir, 'appstart.png');
-      const bridgeJsPath = path.join(clientThingDir, 'input-bridge.js');
-      const bridgeRunPath = path.join(clientThingDir, 'run-input-bridge.sh');
-      const bridgeSupervisorConfPath = path.join(__dirname, '..', 'CarThingRootDir', 'etc', 'supervisor.d', 'clientthing.conf');
+      const deviceDir = path.join(__dirname, '..', 'device');
+      const startupPath = path.join(deviceDir, 'shell-bootstrap.html');
+      const splashPath = path.join(__dirname, '..', 'appstart.png');
+      const bridgeJsPath = path.join(deviceDir, 'inputd.js');
+      const bridgeRunPath = path.join(deviceDir, 'run-inputd.sh');
+      const bridgeConfigPath = path.join(deviceDir, 'clientthing-config.json');
+      const bridgeSupervisorConfPath = path.join(__dirname, '..', 'supervisord.conf');
 
       // 4. Push all provisioned files to /usr/share/clientthing.
       await this.runCommand('shell "mkdir -p /usr/share/clientthing"', deviceId);
       await this.runCommand(`push "${startupPath}" /usr/share/clientthing/shell-bootstrap.html`, deviceId);
       await this.runCommand(`push "${splashPath}" /usr/share/clientthing/appstart.png`, deviceId);
-      await this.runCommand(`push "${bridgeJsPath}" /usr/share/clientthing/input-bridge.js`, deviceId);
-      await this.runCommand(`push "${bridgeRunPath}" /usr/share/clientthing/run-input-bridge.sh`, deviceId);
-      await this.runCommand('shell "chmod +x /usr/share/clientthing/run-input-bridge.sh"', deviceId);
+      await this.runCommand(`push "${bridgeJsPath}" /usr/share/clientthing/inputd.js`, deviceId);
+      await this.runCommand(`push "${bridgeRunPath}" /usr/share/clientthing/run-inputd.sh`, deviceId);
+      await this.tryRunCommand(`push "${bridgeConfigPath}" /usr/share/clientthing/clientthing-config.json`, deviceId);
+      await this.runCommand('shell "chmod +x /usr/share/clientthing/run-inputd.sh"', deviceId);
       // Best-effort: install supervisor program for persistent bridge lifecycle.
       await this.tryRunCommand('shell "mkdir -p /etc/supervisor.d"', deviceId);
       await this.tryRunCommand(`push "${bridgeSupervisorConfPath}" /etc/supervisor.d/clientthing.conf`, deviceId);
@@ -92,16 +94,16 @@ class ADBManager {
       await this.runCommand('shell "test -f /usr/share/qt-superbird-app/webapp/images/appstart.png"', deviceId);
       await this.runCommand('shell "test -f /usr/share/clientthing/shell-bootstrap.html"', deviceId);
       await this.runCommand('shell "test -f /usr/share/clientthing/appstart.png"', deviceId);
-      await this.runCommand('shell "test -f /usr/share/clientthing/input-bridge.js"', deviceId);
-      await this.runCommand('shell "test -f /usr/share/clientthing/run-input-bridge.sh"', deviceId);
+      await this.runCommand('shell "test -f /usr/share/clientthing/inputd.js"', deviceId);
+      await this.runCommand('shell "test -f /usr/share/clientthing/run-inputd.sh"', deviceId);
 
       // 7. Restart input bridge process (stop legacy python + prior node workers).
-      await this.runCommand('shell "pkill -f input-bridge.py || true"', deviceId).catch(() => {});
-      await this.runCommand('shell "pkill -f /tmp/input-bridge.js || true"', deviceId).catch(() => {});
-      await this.runCommand('shell "pkill -f /home/clientthing/input-bridge.js || true"', deviceId).catch(() => {});
-      await this.runCommand('shell "pkill -f /usr/share/clientthing/input-bridge.js || true"', deviceId).catch(() => {});
-      await this.runCommand('shell "pkill -f /tmp/run-input-bridge.sh || true"', deviceId).catch(() => {});
-      await this.runCommand('shell "pkill -f run-input-bridge.sh || true"', deviceId).catch(() => {});
+      await this.runCommand('shell "pkill -f inputd.py || true"', deviceId).catch(() => {});
+      await this.runCommand('shell "pkill -f /tmp/inputd.js || true"', deviceId).catch(() => {});
+      await this.runCommand('shell "pkill -f /home/clientthing/inputd.js || true"', deviceId).catch(() => {});
+      await this.runCommand('shell "pkill -f /usr/share/clientthing/inputd.js || true"', deviceId).catch(() => {});
+      await this.runCommand('shell "pkill -f /tmp/run-inputd.sh || true"', deviceId).catch(() => {});
+      await this.runCommand('shell "pkill -f run-inputd.sh || true"', deviceId).catch(() => {});
 
       // Prefer supervised daemon lifecycle; fallback to nohup when supervisor config is unavailable.
       let bridgeStartedBySupervisor = false;
@@ -114,7 +116,7 @@ class ADBManager {
         console.warn(`[ADB] Supervisor-managed bridge start failed on ${deviceId}:`, e.message);
       }
       if (!bridgeStartedBySupervisor) {
-        await this.runCommand('shell "nohup /usr/share/clientthing/run-input-bridge.sh >/usr/share/clientthing/input-bridge-supervisor.log 2>&1 &"', deviceId).catch(() => {});
+        await this.runCommand('shell "nohup /usr/share/clientthing/run-inputd.sh >/usr/share/clientthing/inputd-supervisor.log 2>&1 &"', deviceId).catch(() => {});
       }
 
       // 8. Kill the stock Spotify app to free up CPU/Memory

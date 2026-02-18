@@ -4,7 +4,7 @@
 import { MessageType, InputType } from '/shared/protocol.js';
 
 // ─── Hardware Key Codes ─────────────────────────────────────────────────────
-// Linux input event key codes from the input-bridge
+// Linux input event key codes from the inputd
 const KEY_CODES = {
   KEY_BACK: 158,
   KEY_ENTER: 28,
@@ -461,7 +461,7 @@ class ShellRuntime {
         break;
 
       case MessageType.S2D_INPUT:
-        // Hardware input from input-bridge
+        // Hardware input from inputd
         this.handleHardwareKeyCode(msg.keyCode, msg.isPressed);
         break;
 
@@ -493,7 +493,7 @@ class ShellRuntime {
   }
 
   handleHardwareKeyCode(keyCode, isPressed) {
-    // Convert Linux key codes from input-bridge to shell input format
+    // Convert Linux key codes from inputd to shell input format
     let input = null;
 
     switch (keyCode) {

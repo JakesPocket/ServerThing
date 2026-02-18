@@ -145,8 +145,40 @@
         const updateStatus = (msg) => {
             document.getElementById('status').innerHTML = msg + '<span class="dot-pulse">...</span>';
         };
-        const target = 'http://127.0.0.1:3000/shell/index.html?t=';
-        const wsProbeUrl = 'ws://127.0.0.1:3000/ws/device?id=bootstrap-probe';
+
+        const defaultConfig = {
+            endpoints: [
+                'http://127.0.0.1:3000',
+                'http://172.16.42.1:3000'
+            ],
+            shellPath: '/shell/index.html',
+            wsProbePath: '/ws/device?id=bootstrap-probe'
+        };
+        let runtimeConfig = defaultConfig;
+
+        const normalizeConfig = (cfg) => {
+            const merged = Object.assign({}, defaultConfig, cfg || {});
+            if (!Array.isArray(merged.endpoints) || merged.endpoints.length === 0) {
+                merged.endpoints = [...defaultConfig.endpoints];
+            }
+            merged.endpoints = merged.endpoints
+                .map((v) => String(v || '').trim().replace(/\/+$/, ''))
+                .filter(Boolean);
+            if (merged.endpoints.length === 0) merged.endpoints = [...defaultConfig.endpoints];
+            if (typeof merged.shellPath !== 'string' || !merged.shellPath.startsWith('/')) merged.shellPath = defaultConfig.shellPath;
+            if (typeof merged.wsProbePath !== 'string' || !merged.wsProbePath.startsWith('/')) merged.wsProbePath = defaultConfig.wsProbePath;
+            return merged;
+        };
+
+        const loadRuntimeConfig = async () => {
+            try {
+                const r = await fetch('./clientthing-config.json?t=' + Date.now(), { cache: 'no-store' });
+                if (!r.ok) return defaultConfig;
+                return normalizeConfig(await r.json());
+            } catch (_) {
+                return defaultConfig;
+            }
+        };
 
         let attempts = 0;
         const maxFastAttempts = 5;
@@ -154,27 +186,44 @@
         const tryLaunchShell = () => {
             attempts += 1;
             updateStatus(attempts <= maxFastAttempts ? 'Loading shell' : 'Server unavailable');
-            let done = false;
-            const ws = new WebSocket(wsProbeUrl + '&t=' + Date.now());
-            const complete = (ok) => {
-                if (done) return;
-                done = true;
-                try { ws.close(); } catch (e) {}
-                if (ok) {
-                    window.location.replace(target + Date.now());
-                } else {
+            let endpointIdx = 0;
+
+            const tryNextEndpoint = () => {
+                if (endpointIdx >= runtimeConfig.endpoints.length) {
                     const delay = attempts <= maxFastAttempts ? 1200 : 3000;
                     setTimeout(tryLaunchShell, delay);
+                    return;
                 }
+                const base = runtimeConfig.endpoints[endpointIdx++];
+                const target = base + runtimeConfig.shellPath + '?t=';
+                const wsProbeUrl = base.replace(/^http/i, 'ws') + runtimeConfig.wsProbePath;
+                let done = false;
+                const ws = new WebSocket(wsProbeUrl + '&t=' + Date.now());
+                const complete = (ok) => {
+                    if (done) return;
+                    done = true;
+                    try { ws.close(); } catch (_) {}
+                    if (ok) {
+                        window.location.replace(target + Date.now());
+                    } else {
+                        tryNextEndpoint();
+                    }
+                };
+                ws.onopen = () => complete(true);
+                ws.onerror = () => complete(false);
+                setTimeout(() => complete(false), 900);
             };
-            ws.onopen = () => complete(true);
-            ws.onerror = () => complete(false);
-            setTimeout(() => complete(false), 900);
+
+            tryNextEndpoint();
         };
 
-        // Startup sequence with local fallback retry loop.
-        setTimeout(() => updateStatus('Establishing tunnel'), 500);
-        setTimeout(tryLaunchShell, 1200);
+        // Startup sequence with runtime-config and retry loop.
+        const start = async () => {
+            runtimeConfig = await loadRuntimeConfig();
+            setTimeout(() => updateStatus('Establishing tunnel'), 500);
+            setTimeout(tryLaunchShell, 1200);
+        };
+        start();
     </script>
 </body>
 </html>

@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// ServerThing Simulator — Input Bridge (Hotspot Edition)
+// ServerThing Simulator — Inputd (Hotspot Edition)
 //
 // Translates mouse / keyboard / touch-panel interactions into hardware
 // events for the Shell iframe.  All physical controls are represented as

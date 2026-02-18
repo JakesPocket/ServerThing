@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Hardened Input Bridge for Car Thing / SuperbBird
+ * Hardened Inputd for Car Thing / SuperbBird
  *
  * - Auto-discovers button + dial event devices from /proc/bus/input/devices
  * - Reads raw numeric getevent output (stable across localized labels)
@@ -15,7 +15,7 @@ const { spawn } = require('child_process');
 
 const CFG = {
   serverUrl: process.env.BRIDGE_SERVER_URL || 'http://127.0.0.1:3000',
-  deviceId: process.env.BRIDGE_DEVICE_ID || 'input-bridge',
+  deviceId: process.env.BRIDGE_DEVICE_ID || 'inputd',
   maxQueue: Number(process.env.BRIDGE_MAX_QUEUE || 256),
   maxBatchSize: Number(process.env.BRIDGE_MAX_BATCH_SIZE || 16),
   maxDialStep: Number(process.env.BRIDGE_MAX_DIAL_STEP || 6),

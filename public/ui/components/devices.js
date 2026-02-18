@@ -5,7 +5,7 @@ const API_BASE = '';
 function getFriendlyType(id) {
   if (!id) return 'Unknown Device';
   if (id === 'simulator') return 'Simulator';
-  if (id === 'input-bridge') return 'Input Bridge';
+  if (id === 'inputd') return 'Inputd';
   if (id === 'bootstrap-probe') return 'Bootstrap Probe';
   if (id.startsWith('shell-')) return 'Shell Client';
   return 'Device';

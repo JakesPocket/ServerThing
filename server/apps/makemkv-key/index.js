@@ -1,17 +1,21 @@
 const { execFile } = require('child_process');
 const express = require('express');
+const path = require('path');
 
 const POSTER_TTL_MS = 6 * 60 * 60 * 1000;
 const posterCache = new Map();
 
 function getConfig() {
+  const defaultLogsDir = '/home/me/docker/acquisition/arm/logs';
+  const defaultArmLogPath = `${defaultLogsDir}/arm.log`;
   return {
     host: process.env.MAKEMKV_HOST || '10.0.0.10',
     user: process.env.MAKEMKV_USER || 'me',
     sshKeyPath: process.env.MAKEMKV_SSH_KEY_PATH || '',
     settingsPath: process.env.MAKEMKV_SETTINGS_PATH || '/home/me/docker/acquisition/arm/.MakeMKV/settings.conf',
-    ripLogPath: process.env.MAKEMKV_RIP_LOG_PATH || '/home/me/docker/acquisition/arm/logs/makemkv.log',
+    ripLogPath: process.env.MAKEMKV_RIP_LOG_PATH || defaultArmLogPath,
     transcodeLogPath: process.env.MAKEMKV_TRANSCODE_LOG_PATH || '/home/me/docker/acquisition/arm/logs/transcode.log',
+    logsDir: process.env.MAKEMKV_LOGS_DIR || path.dirname(process.env.MAKEMKV_RIP_LOG_PATH || defaultArmLogPath),
     internetKey: process.env.MAKEMKV_INTERNET_KEY || 'T-URt6MHxNy3HmfVojU8pE05WQ6HfgVI8S@HiIeNcWFim9rBgNlOdLFROSATCsWikcKW',
     internetExpiry: process.env.MAKEMKV_INTERNET_EXPIRY || '2026-03-31',
     omdbKey: process.env.OMDB_API_KEY || '',
@@ -80,17 +84,73 @@ function parseRipLog(text) {
     text.match(/disc(?:\s+label)?\s*[:=]\s*["']?(.+?)["']?$/im) ||
     text.match(/DRV:\d+,\d+,\d+,\d+,"([^"]+)"/i);
 
-  const phase = active ? 'ripping' : 'idle';
-  const progressPct = parsePercent(text);
+  // MakeMKV emits progress lines like:
+  // PRGV:<current>,<total>,<max>
+  // Use the latest sample and prefer total/max for overall progress.
+  const prgvMatches = Array.from(text.matchAll(/PRGV:(\d+),(\d+),(\d+)/g));
+  let prgvProgressPct = null;
+  let prgvActive = null;
+  if (prgvMatches.length > 0) {
+    const last = prgvMatches[prgvMatches.length - 1];
+    const total = Number(last[2]);
+    const max = Number(last[3]);
+    if (Number.isFinite(total) && Number.isFinite(max) && max > 0) {
+      prgvProgressPct = Math.max(0, Math.min(100, (total / max) * 100));
+      prgvActive = total < max;
+    }
+  }
+
+  const effectiveActive = (prgvActive !== null) ? prgvActive : active;
+  let phase = effectiveActive ? 'ripping' : 'idle';
+  let progressPct = (prgvProgressPct !== null) ? prgvProgressPct : parsePercent(text);
   const etaSec = parseEtaSec(text);
 
+  // ARM wrapper fallback parsing (when PRGV lines are absent).
+  // Example:
+  // [ARM] Starting ARM for DVD on sr0
+  // [ARM] Not CD, Blu-ray, DVD or Data. Bailing out on sr0
+  const armEvents = [];
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const start = line.match(/\[ARM\]\s+Starting ARM for\s+(.+?)\s+on\s+(\S+)/i);
+    if (start) armEvents.push({ kind: 'start', media: start[1].trim(), device: start[2].trim(), idx: i });
+    const bail = line.match(/\[ARM\]\s+Not CD, Blu-ray, DVD or Data\. Bailing out on\s+(\S+)/i);
+    if (bail) armEvents.push({ kind: 'bail', media: 'unknown', device: bail[1].trim(), idx: i });
+  }
+
+  let arm = null;
+  if (armEvents.length > 0) {
+    const last = armEvents[armEvents.length - 1];
+    arm = {
+      event: last.kind,
+      media: last.media,
+      device: last.device,
+      message: last.kind === 'bail'
+        ? `Unsupported media detected on ${last.device}`
+        : `ARM started for ${last.media} on ${last.device}`,
+    };
+
+    // If we don't have PRGV-based activity, use ARM event state.
+    if (prgvProgressPct === null) {
+      if (last.kind === 'start') {
+        phase = 'ripping';
+        progressPct = null;
+      } else if (last.kind === 'bail') {
+        phase = 'idle';
+        progressPct = null;
+      }
+    }
+  }
+
   return {
-    active,
+    active: prgvProgressPct !== null ? effectiveActive : phase === 'ripping',
     title: titleMatch ? titleMatch[1].trim() : '',
     discLabel: discLabelMatch ? discLabelMatch[1].trim() : '',
     progressPct,
     phase,
     etaSec,
+    arm,
   };
 }
 
@@ -230,6 +290,14 @@ async function readRemoteFile(cfg, path) {
   return runSsh(cfg, cmd);
 }
 
+async function detectLatestJobLogPath(cfg) {
+  const cmd =
+    `find ${shSingleQuote(cfg.logsDir)} -maxdepth 1 -type f -name '*_[0-9]*.log' ` +
+    `-printf '%T@ %p\\n' 2>/dev/null | sort -nr | head -n 1 | cut -d' ' -f2-`;
+  const out = await runSsh(cfg, cmd).catch(() => '');
+  return (out || '').trim();
+}
+
 async function detectDrive(cfg) {
   try {
     const out = await runSsh(cfg, "ls /dev/sr* /dev/cdrom* 2>/dev/null || true");
@@ -244,8 +312,17 @@ async function getTelemetry(cfg) {
   const settingsText = await readRemoteFile(cfg, cfg.settingsPath);
   if (!settingsText) issues.push('Unable to read settings.conf');
 
-  const ripText = await readRemoteFile(cfg, cfg.ripLogPath);
-  if (!ripText) issues.push(`Unable to read rip log at ${cfg.ripLogPath}`);
+  const armLogText = await readRemoteFile(cfg, cfg.ripLogPath);
+  if (!armLogText) issues.push(`Unable to read ARM log at ${cfg.ripLogPath}`);
+
+  const latestJobLogPath = await detectLatestJobLogPath(cfg);
+  let latestJobLogText = '';
+  if (latestJobLogPath) {
+    latestJobLogText = await readRemoteFile(cfg, latestJobLogPath);
+    if (!latestJobLogText) issues.push(`Unable to read latest job log at ${latestJobLogPath}`);
+  } else {
+    issues.push(`No ARM job logs found in ${cfg.logsDir}`);
+  }
 
   const transText = await readRemoteFile(cfg, cfg.transcodeLogPath);
   if (!transText) issues.push(`Unable to read transcode log at ${cfg.transcodeLogPath}`);
@@ -253,10 +330,10 @@ async function getTelemetry(cfg) {
   const drives = await detectDrive(cfg);
   const localKey = parseLocalKey(settingsText || '');
   const keyStatus = computeKeyStatus(localKey, cfg.internetKey, cfg.internetExpiry, settingsText ? [] : ['settings.conf unavailable']);
-  const rip = parseRipLog(ripText || '');
-  const transcode = parseTranscodeLog(transText || '');
+  const rip = parseRipLog([latestJobLogText, armLogText].filter(Boolean).join('\n'));
+  const transcode = parseTranscodeLog([transText, latestJobLogText].filter(Boolean).join('\n'));
 
-  return { issues, rip, transcode, keyStatus, drives };
+  return { issues, rip, transcode, keyStatus, drives, latestJobLogPath };
 }
 
 async function buildHealth(cfg) {
@@ -281,7 +358,10 @@ async function buildHealth(cfg) {
   }
 
   try {
-    const { issues, rip, transcode, keyStatus, drives } = await getTelemetry(cfg);
+    const { issues, rip, transcode, keyStatus, drives, latestJobLogPath } = await getTelemetry(cfg);
+    if (rip && rip.arm && rip.arm.event === 'bail') {
+      issues.push(rip.arm.message);
+    }
     const title = rip.title || rip.discLabel || '';
     const media = (await fetchPoster(title, cfg.omdbKey)) || { posterUrl: '', title, year: '' };
     const state = computeOverallState({ rip, transcode, keyStatus, issues });
@@ -306,6 +386,9 @@ async function buildHealth(cfg) {
         detected: driveDetected,
         count: drives.length,
         devices: drives,
+      },
+      debug: {
+        latestJobLogPath: latestJobLogPath || '',
       },
     };
   } catch (error) {

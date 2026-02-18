@@ -635,10 +635,10 @@ wssDevice.on('connection', (ws, request) => {
         const message = JSON.parse(data.toString());
         console.log(`[Device] Message from ${deviceId}:`, message.type);
         
-        // ── Hardware Input Bridge ───────────────────────────────────────────
-        // If this is the input-bridge, forward raw input to shell devices
-        if (deviceId === 'input-bridge' && message.type === 'input') {
-          console.log(`[Input Bridge] Forwarding input to shell devices:`, message);
+        // ── Hardware Inputd ───────────────────────────────────────────
+        // If this is the inputd, forward raw input to shell devices
+        if (deviceId === 'inputd' && message.type === 'input') {
+          console.log(`[Inputd] Forwarding input to shell devices:`, message);
           deviceConnections.forEach((deviceWs, devId) => {
             if (devId.startsWith('shell-') && deviceWs.readyState === 1) { // 1 = OPEN
               deviceWs.send(JSON.stringify({
@@ -809,7 +809,7 @@ app.post('/api/input', (req, res) => {
     return res.status(400).json({ error: 'Missing required fields' });
   }
   
-  console.log(`[Input Bridge] Received input: keyCode=${keyCode}, isPressed=${isPressed}`);
+  console.log(`[Inputd] Received input: keyCode=${keyCode}, isPressed=${isPressed}`);
   
   // Broadcast to all shell devices
   forwardInputToShellDevices(keyCode, isPressed);
@@ -826,7 +826,7 @@ app.post('/api/input/batch', (req, res) => {
   const maxBatch = 64;
   const accepted = events.slice(0, maxBatch);
   if (accepted.length !== events.length) {
-    console.warn(`[Input Bridge] Batch truncated ${events.length} -> ${accepted.length}`);
+    console.warn(`[Inputd] Batch truncated ${events.length} -> ${accepted.length}`);
   }
 
   for (const evt of accepted) {
@@ -851,7 +851,7 @@ app.post('/api/input/health', (req, res) => {
   };
   // Low-noise heartbeat log; details still available for debugging.
   if (queueSize > 32 || (stats && stats.sendFailures > 0)) {
-    console.warn(`[Input Bridge] Health warn device=${deviceId} queue=${queueSize} monitors=${monitorCount}`);
+    console.warn(`[Inputd] Health warn device=${deviceId} queue=${queueSize} monitors=${monitorCount}`);
   }
   res.json({ success: true });
 });

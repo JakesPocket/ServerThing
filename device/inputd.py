@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Hardware Input Bridge for Spotify Car Thing
+Hardware Inputd for Spotify Car Thing
 Reads from /dev/input/event* and sends to server via HTTP
 Uses direct event reading (no getevent required)
 """
@@ -49,7 +49,7 @@ def send_input(key_code, is_pressed):
     """Send input event to server via HTTP POST"""
     try:
         data = json.dumps({
-            'deviceId': 'input-bridge',
+            'deviceId': 'inputd',
             'keyCode': key_code,
             'isPressed': is_pressed
         }).encode('utf-8')
@@ -64,13 +64,13 @@ def send_input(key_code, is_pressed):
         with request.urlopen(req, timeout=1) as response:
             pass
         
-        print(f'[Input Bridge] Sent: keyCode={key_code}, isPressed={is_pressed}')
+        print(f'[Inputd] Sent: keyCode={key_code}, isPressed={is_pressed}')
     except Exception as e:
-        print(f'[Input Bridge] Error sending: {e}')
+        print(f'[Inputd] Error sending: {e}')
 
 def monitor_buttons():
     """Monitor button events from event0"""
-    print(f'[Input Bridge] Starting button monitor: {DEVICE_BUTTONS}')
+    print(f'[Inputd] Starting button monitor: {DEVICE_BUTTONS}')
     
     # Map hardware codes to virtual codes we send to server
     key_map = {
@@ -102,13 +102,13 @@ def monitor_buttons():
                             send_input(key_map[code], False)
         
         except Exception as e:
-            print(f'[Input Bridge] Button monitor error: {e}')
+            print(f'[Inputd] Button monitor error: {e}')
         
         time.sleep(1)  # Retry delay
 
 def monitor_dial():
     """Monitor dial rotation events from event1"""
-    print(f'[Input Bridge] Starting dial monitor: {DEVICE_DIAL}')
+    print(f'[Inputd] Starting dial monitor: {DEVICE_DIAL}')
     
     while True:
         try:
@@ -138,12 +138,12 @@ def monitor_dial():
                             send_input(KEY_LEFT, False)
         
         except Exception as e:
-            print(f'[Input Bridge] Dial monitor error: {e}')
+            print(f'[Inputd] Dial monitor error: {e}')
         
         time.sleep(1)  # Retry delay
 
 if __name__ == '__main__':
-    print('[Input Bridge] Starting hardware input bridge...')
+    print('[Inputd] Starting hardware input bridge...')
     
     # Start both monitors in separate threads
     button_thread = Thread(target=monitor_buttons, daemon=True)
@@ -157,4 +157,4 @@ if __name__ == '__main__':
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        print('[Input Bridge] Shutting down...')
+        print('[Inputd] Shutting down...')
