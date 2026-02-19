@@ -34,7 +34,7 @@ const CFG = {
 const SERVER = new URL(CFG.serverUrl);
 const AGENT = new http.Agent({ keepAlive: true, maxSockets: 1 });
 
-// Shell virtual codes expected by public/shell/shell_v3.js
+// Shell virtual codes expected by public/shell/shell.js
 const VKEY = {
   KEY_BACK: 158,
   KEY_ENTER: 28,

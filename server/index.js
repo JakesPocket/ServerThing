@@ -3,14 +3,18 @@ const { WebSocketServer } = require('ws');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
-const { MessageType } = require('../shared/protocol.js');
+const { MessageType, Protocol } = require('../shared/protocol.js');
 const multer = require('multer');
 const AdmZip = require('adm-zip');
 const adbManager = require('./adb-manager');
 
 const PORT = process.env.PORT || 3000;
-const AUTO_PROVISION = String(process.env.ST_AUTO_PROVISION || '').toLowerCase() === '1'
-  || String(process.env.ST_AUTO_PROVISION || '').toLowerCase() === 'true';
+const PROVISIONING_ENABLED = String(process.env.ST_ENABLE_PROVISIONING || '').toLowerCase() === '1'
+  || String(process.env.ST_ENABLE_PROVISIONING || '').toLowerCase() === 'true';
+const AUTO_PROVISION = PROVISIONING_ENABLED && (
+  String(process.env.ST_AUTO_PROVISION || '').toLowerCase() === '1'
+  || String(process.env.ST_AUTO_PROVISION || '').toLowerCase() === 'true'
+);
 // Latest heartbeat from on-device input bridge (for diagnostics UI).
 let latestInputBridgeHealth = null;
 const DATA_DIR = path.join(__dirname, '..', 'data');
@@ -65,6 +69,33 @@ function parseClientInfo(request) {
     deviceClass: detectDeviceClass(userAgent),
     ip: ip || 'unknown',
   };
+}
+
+function coerceCapabilities(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return {};
+  const out = {};
+  for (const [k, v] of Object.entries(input)) {
+    if (typeof v === 'boolean') out[k] = v;
+  }
+  return out;
+}
+
+function inferLegacyClientType(deviceId) {
+  if (String(deviceId || '').startsWith('shell-')) return 'carthing-shell';
+  return 'unknown';
+}
+
+function shouldRouteHardwareToDevice(deviceId, deviceState) {
+  const state = deviceState || {};
+  const caps = state.capabilities || {};
+  if (typeof caps.acceptsHardwareKeycodes === 'boolean') {
+    return caps.acceptsHardwareKeycodes;
+  }
+  if (typeof state.clientType === 'string' && state.clientType !== 'unknown') {
+    return state.clientType === 'carthing-shell';
+  }
+  // Backward compatibility for older shell clients without handshake.
+  return String(deviceId || '').startsWith('shell-');
 }
 
 /**
@@ -512,6 +543,8 @@ function startADBPooling() {
 if (AUTO_PROVISION) {
   console.log('[ADB] Auto-provision loop enabled (ST_AUTO_PROVISION=1).');
   startADBPooling();
+} else if (!PROVISIONING_ENABLED) {
+  console.log('[ADB] Provisioning disabled (ST_ENABLE_PROVISIONING=0). Runtime ADB controls remain available.');
 } else {
   console.log('[ADB] Auto-provision loop disabled. Use /ui -> Provision button or POST /api/admin/scan-devices.');
 }
@@ -614,7 +647,13 @@ wssDevice.on('connection', (ws, request) => {
       try { previous.close(); } catch {}
     }
     deviceConnections.set(deviceId, ws);
-    deviceManager.updateDevice(deviceId, { connected: true, clientInfo });
+    deviceManager.updateDevice(deviceId, {
+      connected: true,
+      clientInfo,
+      clientType: inferLegacyClientType(deviceId),
+      protocolVersion: null,
+      capabilities: {},
+    });
     console.log(`[Device] Device ${deviceId} added to connections. Total devices: ${deviceConnections.size}`);
     
     broadcastUI({ type: MessageType.S2U_DEVICES_CHANGED });
@@ -634,13 +673,39 @@ wssDevice.on('connection', (ws, request) => {
       try {
         const message = JSON.parse(data.toString());
         console.log(`[Device] Message from ${deviceId}:`, message.type);
+
+        if (message.type === MessageType.D2S_HELLO) {
+          const clientType = typeof message.clientType === 'string' && message.clientType.trim()
+            ? message.clientType.trim()
+            : inferLegacyClientType(deviceId);
+          const parsedProtocolVersion = Number(message.protocolVersion);
+          const protocolVersion = Number.isInteger(parsedProtocolVersion)
+            ? parsedProtocolVersion
+            : null;
+          const capabilities = coerceCapabilities(message.capabilities);
+          const shellVersion = typeof message.shellVersion === 'string' ? message.shellVersion : '';
+          deviceManager.updateDevice(deviceId, {
+            clientType,
+            protocolVersion,
+            capabilities,
+            shellVersion,
+          });
+          ws.send(JSON.stringify({
+            type: MessageType.S2D_HELLO_ACK,
+            protocolVersion: Protocol.SHELL_PROTOCOL_VERSION,
+            deviceId,
+          }));
+          broadcastUI({ type: MessageType.S2U_DEVICES_CHANGED });
+          return;
+        }
         
         // ── Hardware Inputd ───────────────────────────────────────────
         // If this is the inputd, forward raw input to shell devices
         if (deviceId === 'inputd' && message.type === 'input') {
           console.log(`[Inputd] Forwarding input to shell devices:`, message);
           deviceConnections.forEach((deviceWs, devId) => {
-            if (devId.startsWith('shell-') && deviceWs.readyState === 1) { // 1 = OPEN
+            const state = deviceManager.getDevice(devId);
+            if (shouldRouteHardwareToDevice(devId, state) && deviceWs.readyState === 1) { // 1 = OPEN
               deviceWs.send(JSON.stringify({
                 type: MessageType.S2D_INPUT,
                 keyCode: message.keyCode,
@@ -700,6 +765,10 @@ wssDevice.on('connection', (ws, request) => {
               });
             }
             if (command === 'repair_clientthing') {
+              if (!PROVISIONING_ENABLED) {
+                console.warn(`[Device] Ignoring repair_clientthing from ${deviceId} because provisioning is disabled.`);
+                return;
+              }
               adbManager.listDevices().then(adbDevices => {
                 for (const adbId of adbDevices) {
                   adbManager.repairClientThing(adbId).catch(err => {
@@ -791,7 +860,8 @@ app.get('/api/apps', (req, res) => {
 
 function forwardInputToShellDevices(keyCode, isPressed) {
   deviceConnections.forEach((ws, devId) => {
-    if (devId.startsWith('shell-') && ws.readyState === 1) { // 1 = OPEN
+    const state = deviceManager.getDevice(devId);
+    if (shouldRouteHardwareToDevice(devId, state) && ws.readyState === 1) { // 1 = OPEN
       ws.send(JSON.stringify({
         type: MessageType.S2D_INPUT,
         keyCode,
@@ -961,6 +1031,12 @@ app.post('/api/apps/install', upload.single('app-zip'), (req, res) => {
  */
 app.post('/api/admin/scan-devices', async (req, res) => {
   try {
+    if (!PROVISIONING_ENABLED) {
+      return res.status(403).json({
+        error: 'Provisioning is disabled (set ST_ENABLE_PROVISIONING=1 to enable).'
+      });
+    }
+
     const isAdbAvailable = await adbManager.checkADB();
     if (!isAdbAvailable) {
       return res.status(500).json({ error: 'ADB not found on server. Please install platform-tools.' });
@@ -991,6 +1067,8 @@ app.get('/api/admin/status', async (req, res) => {
   const adbAvailable = await adbManager.checkADB();
   res.json({
     adbAvailable,
+    provisioningEnabled: PROVISIONING_ENABLED,
+    autoProvisionEnabled: AUTO_PROVISION,
     localIP: adbManager.getLocalIP(),
     serverPort: PORT,
     platform: os.platform()

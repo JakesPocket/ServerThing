@@ -28,6 +28,14 @@ Server will start on http://localhost:3000
 - **Control Panel** (for desktop): http://localhost:3000/ui
 - **WebSocket**: ws://localhost:3000/ws/device
 
+### Provisioning Mode
+
+- Provisioning/push flows are disabled by default for custom firmware setups.
+- To enable device provisioning tools (UI "Provision" and `/api/admin/scan-devices`), set:
+  - `ST_ENABLE_PROVISIONING=1`
+- Optional auto-loop (only works when provisioning is enabled):
+  - `ST_AUTO_PROVISION=1`
+
 ## Architecture
 
 ```
@@ -104,6 +112,7 @@ The **System UI Shell** (`/shell/`) is a permanent, embedded-style UI runtime de
 - **1-4**: Preset buttons
 
 For detailed documentation, see [SHELL_GUIDE.md](SHELL_GUIDE.md).
+For firmware/server compatibility requirements, see [docs/FIRMWARE_SERVERTHING_CONTRACT.md](docs/FIRMWARE_SERVERTHING_CONTRACT.md).
 
 ## Creating Apps
 

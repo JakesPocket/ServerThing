@@ -151,7 +151,7 @@
                 'http://127.0.0.1:3000',
                 'http://172.16.42.1:3000'
             ],
-            shellPath: '/shell/index.html',
+            shellPath: '/shell/index.html?client=carthing',
             wsProbePath: '/ws/device?id=bootstrap-probe'
         };
         let runtimeConfig = defaultConfig;
@@ -195,7 +195,9 @@
                     return;
                 }
                 const base = runtimeConfig.endpoints[endpointIdx++];
-                const target = base + runtimeConfig.shellPath + '?t=';
+                const baseTarget = base + runtimeConfig.shellPath;
+                const cacheBusterSep = baseTarget.includes('?') ? '&' : '?';
+                const target = baseTarget + cacheBusterSep + 't=';
                 const wsProbeUrl = base.replace(/^http/i, 'ws') + runtimeConfig.wsProbePath;
                 let done = false;
                 const ws = new WebSocket(wsProbeUrl + '&t=' + Date.now());

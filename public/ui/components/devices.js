@@ -24,15 +24,23 @@ function resolveSerial(device, adbSerials) {
 function classifyDevices(connectedDevices, adbSerials) {
   const assignment = new Map();
   const shellDevices = connectedDevices
-    .filter((d) => String(d.id || '').startsWith('shell-'))
+    .filter((d) => {
+      if (String(d.id || '').startsWith('shell-')) return true;
+      return String(d.clientType || '').includes('shell');
+    })
     .sort((a, b) => Number(b.lastSeen || 0) - Number(a.lastSeen || 0));
 
-  // Treat the newest N shell sessions as physical Car Thing devices,
-  // where N is the number of connected ADB serials.
+  // Explicit handshaked carthing-shell clients map to ADB slots.
+  // Legacy clients fall back to newest-N heuristic.
   const slots = [...adbSerials];
   for (const device of shellDevices) {
-    if (slots.length > 0) {
+    const caps = device.capabilities || {};
+    const isCarThing = device.clientType === 'carthing-shell'
+      || caps.acceptsHardwareKeycodes === true;
+    if (isCarThing && slots.length > 0) {
       assignment.set(device.id, { kind: 'carthing', serial: slots.shift() });
+    } else if (device.clientType === 'simulator-shell') {
+      assignment.set(device.id, { kind: 'simulator' });
     } else {
       assignment.set(device.id, { kind: 'browser' });
     }
@@ -43,6 +51,7 @@ function classifyDevices(connectedDevices, adbSerials) {
 function displayName(device, adbSerials, assignment) {
   const a = assignment.get(device.id);
   if (a?.kind === 'carthing') return `Car Thing (${a.serial})`;
+  if (a?.kind === 'simulator') return 'Simulator Shell';
   if (a?.kind === 'browser') {
     const browser = device.clientInfo?.browser;
     return browser && browser !== 'Unknown' ? `Browser (${browser})` : 'Browser';
@@ -50,6 +59,9 @@ function displayName(device, adbSerials, assignment) {
 
   const type = getFriendlyType(device.id);
   const serial = resolveSerial(device, adbSerials);
+  if (device.clientType === 'carthing-shell') return serial ? `Car Thing (${serial})` : 'Car Thing';
+  if (device.clientType === 'web-shell') return 'Browser Shell';
+  if (device.clientType === 'simulator-shell') return 'Simulator Shell';
   return serial ? `${type} (${serial})` : type;
 }
 
@@ -61,11 +73,13 @@ function displayId(device, assignment) {
 
 function displayClientDetails(device) {
   const info = device.clientInfo;
-  if (!info) return '';
   const bits = [];
-  if (info.deviceClass && info.deviceClass !== 'unknown') bits.push(info.deviceClass);
-  if (info.platform && info.platform !== 'Unknown') bits.push(info.platform);
-  if (info.ip && info.ip !== 'unknown') bits.push(info.ip);
+  if (device.clientType && device.clientType !== 'unknown') bits.push(device.clientType);
+  if (Number.isInteger(device.protocolVersion)) bits.push(`proto v${device.protocolVersion}`);
+  if (!info && bits.length === 0) return '';
+  if (info && info.deviceClass && info.deviceClass !== 'unknown') bits.push(info.deviceClass);
+  if (info && info.platform && info.platform !== 'Unknown') bits.push(info.platform);
+  if (info && info.ip && info.ip !== 'unknown') bits.push(info.ip);
   if (bits.length === 0) return '';
   return `<p>Client: ${bits.join(' • ')}</p>`;
 }
@@ -113,6 +127,20 @@ export function initDeviceControls() {
   if (!clearBtn || !provisionBtn) return;
   const originalProvisionLabel = provisionBtn.textContent;
   const originalLabel = clearBtn.textContent;
+
+  // In custom-firmware mode, provisioning is intentionally disabled unless
+  // ST_ENABLE_PROVISIONING is explicitly enabled on the server.
+  fetch(`${API_BASE}/api/admin/status`)
+    .then((r) => (r.ok ? r.json() : null))
+    .then((status) => {
+      if (!status) return;
+      if (status.provisioningEnabled === false) {
+        provisionBtn.disabled = true;
+        provisionBtn.textContent = 'Provision (Disabled)';
+        provisionBtn.title = 'Enable ST_ENABLE_PROVISIONING=1 on the server to use provisioning.';
+      }
+    })
+    .catch(() => {});
 
   provisionBtn.addEventListener('click', async () => {
     provisionBtn.disabled = true;

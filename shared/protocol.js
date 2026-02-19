@@ -3,6 +3,7 @@
 const MessageType = {
   // Server to Device
   S2D_CONNECTED: 'connected',
+  S2D_HELLO_ACK: 'hello-ack',
   S2D_APP_ENABLED: 'app-enabled',
   S2D_APP_DISABLED: 'app-disabled',
   S2D_APPS_RELOADED: 'apps-reloaded',
@@ -11,6 +12,7 @@ const MessageType = {
   S2D_TIME_SYNC: 'time-sync',
 
   // Device to Server
+  D2S_HELLO: 'hello',
   D2S_INPUT: 'input',
   
   // Server to UI
@@ -42,6 +44,10 @@ const TouchValue = {
   TAP: 'tap',
 };
 
+const Protocol = {
+  SHELL_PROTOCOL_VERSION: 1,
+};
+
 // This file is a CommonJS module, so we use module.exports
 // This makes it easy to share between Node.js (server) and browser (with a bundler, or by manually including)
 // For this project, we will use it as a CJS module on the server and an ES module on the client.
@@ -52,7 +58,8 @@ try {
     InputType,
     ButtonValue,
     DialValue,
-    TouchValue
+    TouchValue,
+    Protocol
   };
 } catch (e) {
   // We are in a browser environment, do nothing.
@@ -69,5 +76,6 @@ export {
   InputType,
   ButtonValue,
   DialValue,
-  TouchValue
+  TouchValue,
+  Protocol
 };

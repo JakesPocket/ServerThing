@@ -1,7 +1,24 @@
 // System UI Shell - Permanent Runtime for ServerThing
 // Hardware-integrated version — resolution-independent (Car Thing / Tablet / Phone)
 
-import { MessageType, InputType } from '/shared/protocol.js';
+import { MessageType, InputType, Protocol } from '/shared/protocol.js';
+
+// ─── Hardware Key Codes ─────────────────────────────────────────────────────
+// Linux input event key codes from the inputd
+const KEY_CODES = {
+  KEY_BACK: 158,
+  KEY_ENTER: 28,
+  KEY_LEFT: 105,
+  KEY_RIGHT: 106,
+  // Settings button (varies by input bridge / firmware; include common candidates)
+  KEY_MENU: 139,
+  KEY_SETUP: 141,
+  KEY_CONFIG: 171,
+  BTN_0: 256,  // Preset 1
+  BTN_1: 257,  // Preset 2
+  BTN_2: 258,  // Preset 3
+  BTN_3: 259   // Preset 4
+};
 
 // ─── Device Scaling Hook ────────────────────────────────────────────────────
 // Detects the host device class and sets the root font-size so that all rem
@@ -30,6 +47,28 @@ function applyDeviceScale() {
 applyDeviceScale();
 window.addEventListener('resize', applyDeviceScale);
 
+// Preload Material Symbols and toggle a class once available so glyphs replace fallbacks
+function loadMaterialSymbolsFont() {
+  const CLASS_NAME = 'material-font-loaded';
+  const FACE_DECL = '400 24px "Material Symbols Outlined"';
+  const markLoaded = () => document.body.classList.add(CLASS_NAME);
+
+  try {
+    if (document.fonts && document.fonts.load) {
+      document.fonts.load(FACE_DECL).then(() => {
+        // Only enable when the browser confirms the face is present.
+        if (document.fonts.check && document.fonts.check(FACE_DECL)) {
+          markLoaded();
+        }
+      }).catch(() => {});
+    } else {
+      // Older engines: leave fallbacks in place.
+    }
+  } catch (e) {
+    // Leave fallbacks in place on failure.
+  }
+}
+
 // ─── Config Manager ─────────────────────────────────────────────────────────
 // Lightweight localStorage-backed state layer.  Single source of truth for app
 // order, display-name overrides, and icon overrides.
@@ -51,6 +90,15 @@ class ConfigManager {
 
   /** Map of appId → { iconName?, backgroundColor?, glyphColor? }. */
   get iconOverrides()    { return this._data.iconOverrides; }
+
+  /** System settings persisted for the shell UI. */
+  get systemSettings()    { return this._data.systemSettings; }
+
+  setSystemSetting(key, value) {
+    if (!this._data.systemSettings) this._data.systemSettings = {};
+    this._data.systemSettings[key] = value;
+    this._save();
+  }
 
   /** Get the display name for an app (override or original). */
   displayName(app) {
@@ -102,12 +150,22 @@ class ConfigManager {
           appOrder:      Array.isArray(parsed.appOrder) ? parsed.appOrder : [],
           nameOverrides: parsed.nameOverrides || {},
           iconOverrides: parsed.iconOverrides || {},
+          systemSettings: parsed.systemSettings || {
+            autoDim: true,
+            brightness: 128,
+            mic: false,
+          },
         };
       }
     } catch (e) {
       console.warn('[ConfigManager] Failed to load — resetting', e);
     }
-    return { appOrder: [], nameOverrides: {}, iconOverrides: {} };
+    return {
+      appOrder: [],
+      nameOverrides: {},
+      iconOverrides: {},
+      systemSettings: { autoDim: true, brightness: 128, mic: false },
+    };
   }
 
   _save() {
@@ -197,8 +255,12 @@ class IconManager {
 class ShellRuntime {
   constructor() {
     this.version = "1.0.1-syncFix";
+    this.protocolVersion = Protocol.SHELL_PROTOCOL_VERSION;
+    this.clientType = this.detectClientType();
+    this.capabilities = this.detectCapabilities(this.clientType);
+    this.isHardwareBackedShell = !!this.capabilities.acceptsHardwareKeycodes;
     this.ws = null;
-    this.deviceId = `shell-${Date.now()}`;
+    this.deviceId = this.getOrCreateStableDeviceId();
     this.iconManager = new IconManager();
     this.configManager = new ConfigManager();
     this.apps = []; // Populated via WebSocket from server
@@ -208,6 +270,7 @@ class ShellRuntime {
     
     // Time Sync
     this.serverTimeOffset = 0;
+    this.serverTzOffset = 0;
 
     // Focus Zone: 'statusbar' | 'grid' | 'app'
     this.focusZone = 'grid';
@@ -221,6 +284,13 @@ class ShellRuntime {
     // Timer for Long Press
     this.backButtonTimer = null;
     this.isLongPress = false;
+    this.settingsButtonTimer = null;
+    this.isSettingsLongPress = false;
+    this.hasConnectedOnce = false;
+    this.isDisconnectedScreenVisible = false;
+    this.reconnectTimer = null;
+    this._brightnessLastSent = null;
+    this.inputHealthPollTimer = null;
 
     this.elements = {
       statusBar: document.getElementById('status-bar'),
@@ -228,26 +298,54 @@ class ShellRuntime {
       sysSettingsButton: document.getElementById('sys-settings-button'),
       navIcon: document.getElementById('nav-icon'),
       statusTime: document.getElementById('status-time'),
-      statusConnection: document.getElementById('status-connection'),
       homeScreen: document.getElementById('home-screen'),
       appGrid: document.getElementById('app-grid'),
       appContainer: document.getElementById('app-container'),
       loading: document.getElementById('loading'),
+      disconnectScreen: document.getElementById('disconnect-screen'),
       settingsOverlay: document.getElementById('settings-overlay'),
       closeSettings: document.getElementById('close-settings'),
       brightnessSlider: document.getElementById('brightness-slider'),
+      brightnessValue: document.getElementById('brightness-value'),
+      autoDimToggle: document.getElementById('auto-dim-toggle'),
+      micToggle: document.getElementById('mic-toggle'),
+      diagnosticsSection: document.getElementById('diagnostics-section'),
+      diagnosticsToggle: document.getElementById('diagnostics-toggle'),
+      restartChromiumBtn: document.getElementById('restart-chromium'),
+      rebootDeviceBtn: document.getElementById('reboot-device'),
+      diagServerLink: document.getElementById('diag-server-link'),
+      diagQueueSize: document.getElementById('diag-queue-size'),
+      diagSendFailures: document.getElementById('diag-send-failures'),
+      diagMonitorCount: document.getElementById('diag-monitor-count'),
+      diagLastUpdate: document.getElementById('diag-last-update'),
     };
 
     this.init();
   }
 
+  getOrCreateStableDeviceId() {
+    const key = 'serverthing-shell-device-id';
+    try {
+      const existing = localStorage.getItem(key);
+      if (existing && existing.trim()) return existing;
+      const created = `shell-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      localStorage.setItem(key, created);
+      return created;
+    } catch {
+      // Fallback for restricted storage environments.
+      return `shell-${Date.now()}`;
+    }
+  }
+
   init() {
     console.log('[Shell] Initializing Runtime');
     this.updateBodyDataset();
+    this.applyClientCapabilitiesToUI();
     // Order: Back button (Left), Settings (Right)
     this.statusBarItems = [this.elements.sysNavButton, this.elements.sysSettingsButton];
     this.startClock();
     this.addEventListeners();
+    this.applySystemSettingsToUI();
     this.connectWebSocket();
     this.renderAppGrid();
     this.applyZoneFocus();
@@ -256,25 +354,38 @@ class ShellRuntime {
 
   // ─── WebSocket ──────────────────────────────────────────────────────────
   connectWebSocket() {
+    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+
     const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
-    const url = `${protocol}://${location.host}/ws/device`;
+    const url = `${protocol}://${location.host}/ws/device?id=${encodeURIComponent(this.deviceId)}`;
     console.log(`[Shell] Connecting to ${url}`);
 
     this.ws = new WebSocket(url);
 
     this.ws.addEventListener('open', () => {
       console.log('[Shell] WebSocket connected');
+      this.sendHello();
+      this.hasConnectedOnce = true;
+      this.clearReconnectTimer();
       this.updateConnectionStatus(true);
+      this.showDisconnectScreen(false);
+      // Re-apply persisted system settings to the device on reconnect.
+      if (this.isHardwareBackedShell) this.applySystemSettingsToDevice();
     });
 
     this.ws.addEventListener('close', () => {
       console.log('[Shell] WebSocket disconnected — reconnecting in 3 s');
       this.updateConnectionStatus(false);
-      setTimeout(() => this.connectWebSocket(), 3000);
+      if (this.hasConnectedOnce) this.showDisconnectScreen(true);
+      this.scheduleReconnect();
     });
 
     this.ws.addEventListener('error', () => {
       this.updateConnectionStatus(false);
+      if (this.hasConnectedOnce) this.showDisconnectScreen(true);
+      this.scheduleReconnect();
     });
 
     this.ws.addEventListener('message', (event) => {
@@ -286,7 +397,27 @@ class ShellRuntime {
   }
 
   updateConnectionStatus(connected) {
-    this.elements.statusConnection.classList.toggle('connected', connected);
+    // Connection state is reflected by the full-screen disconnect overlay.
+  }
+
+  showDisconnectScreen(show) {
+    if (!this.elements.disconnectScreen || this.isDisconnectedScreenVisible === show) return;
+    this.isDisconnectedScreenVisible = show;
+    this.elements.disconnectScreen.classList.toggle('hidden', !show);
+  }
+
+  scheduleReconnect() {
+    if (this.reconnectTimer) return;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connectWebSocket();
+    }, 3000);
+  }
+
+  clearReconnectTimer() {
+    if (!this.reconnectTimer) return;
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
   }
 
   handleServerMessage(msg) {
@@ -298,15 +429,25 @@ class ShellRuntime {
         if (msg.serverTime) {
           this.serverTimeOffset = msg.serverTime - Date.now();
         }
+        if (typeof msg.serverTzOffset !== 'undefined') {
+          this.serverTzOffset = msg.serverTzOffset;
+        }
         if (msg.apps) {
           this.apps = msg.apps;
           this.renderAppGrid();
         }
         break;
 
+      case MessageType.S2D_HELLO_ACK:
+        console.log('[Shell] Handshake acknowledged by server');
+        break;
+
       case MessageType.S2D_TIME_SYNC:
         if (msg.serverTime) {
           this.serverTimeOffset = msg.serverTime - Date.now();
+        }
+        if (typeof msg.serverTzOffset !== 'undefined') {
+          this.serverTzOffset = msg.serverTzOffset;
         }
         break;
 
@@ -327,6 +468,11 @@ class ShellRuntime {
 
       case MessageType.S2D_APP_RESPONSE:
         this.forwardToActiveApp(msg);
+        break;
+
+      case MessageType.S2D_INPUT:
+        // Hardware input from inputd
+        this.handleHardwareKeyCode(msg.keyCode, msg.isPressed);
         break;
 
       case MessageType.S2D_INPUT_RECEIVED:
@@ -356,6 +502,79 @@ class ShellRuntime {
     }
   }
 
+  handleHardwareKeyCode(keyCode, isPressed) {
+    // Convert Linux key codes from inputd to shell input format
+    let input = null;
+
+    switch (keyCode) {
+      case KEY_CODES.KEY_LEFT:
+        if (isPressed) {
+          input = { type: InputType.DIAL, value: 'left' };
+        }
+        break;
+
+      case KEY_CODES.KEY_RIGHT:
+        if (isPressed) {
+          input = { type: InputType.DIAL, value: 'right' };
+        }
+        break;
+
+      case KEY_CODES.KEY_ENTER:
+        input = { 
+          type: InputType.BUTTON, 
+          value: isPressed ? 'dial_click_down' : 'dial_click_up' 
+        };
+        break;
+
+      case KEY_CODES.KEY_BACK:
+        input = { 
+          type: InputType.BUTTON, 
+          value: isPressed ? 'back_button_down' : 'back_button_up' 
+        };
+        break;
+
+      case KEY_CODES.KEY_MENU:
+      case KEY_CODES.KEY_SETUP:
+      case KEY_CODES.KEY_CONFIG:
+        input = {
+          type: InputType.BUTTON,
+          value: isPressed ? 'settings_button_down' : 'settings_button_up'
+        };
+        break;
+
+      case KEY_CODES.BTN_0:
+        if (isPressed) {
+          input = { type: InputType.BUTTON, value: 'preset_1' };
+        }
+        break;
+
+      case KEY_CODES.BTN_1:
+        if (isPressed) {
+          input = { type: InputType.BUTTON, value: 'preset_2' };
+        }
+        break;
+
+      case KEY_CODES.BTN_2:
+        if (isPressed) {
+          input = { type: InputType.BUTTON, value: 'preset_3' };
+        }
+        break;
+
+      case KEY_CODES.BTN_3:
+        if (isPressed) {
+          input = { type: InputType.BUTTON, value: 'preset_4' };
+        }
+        break;
+    }
+
+    if (input) {
+      console.log('[Shell] Hardware input:', input);
+      this.handleHardwareInput(input);
+    } else if (isPressed) {
+      console.log('[Shell] Unmapped hardware keyCode:', keyCode);
+    }
+  }
+
   setInteractionMode(mode) {
     if (this.interactionMode === mode) return;
     this.interactionMode = mode;
@@ -364,6 +583,48 @@ class ShellRuntime {
 
   updateBodyDataset() {
     document.body.setAttribute('data-interaction-mode', this.interactionMode);
+    document.body.setAttribute('data-client-type', this.clientType);
+  }
+
+  detectClientType() {
+    const qp = new URLSearchParams(window.location.search);
+    const raw = String(qp.get('client') || '').toLowerCase();
+    if (raw === 'carthing' || raw === 'carthing-shell') return 'carthing-shell';
+    if (raw === 'simulator' || raw === 'sim-shell' || raw === 'simulator-shell') return 'simulator-shell';
+    return 'web-shell';
+  }
+
+  detectCapabilities(clientType) {
+    const isCarThing = clientType === 'carthing-shell';
+    const isSimulator = clientType === 'simulator-shell';
+    return {
+      acceptsHardwareKeycodes: isCarThing,
+      supportsSystemCommands: isCarThing,
+      supportsTouch: !isCarThing || isSimulator,
+      supportsDialInput: true,
+      supportsButtons: true,
+    };
+  }
+
+  applyClientCapabilitiesToUI() {
+    if (this.isHardwareBackedShell) return;
+    if (this.elements.autoDimToggle) this.elements.autoDimToggle.disabled = true;
+    if (this.elements.micToggle) this.elements.micToggle.disabled = true;
+    if (this.elements.brightnessSlider) this.elements.brightnessSlider.disabled = true;
+    if (this.elements.restartChromiumBtn) this.elements.restartChromiumBtn.disabled = true;
+    if (this.elements.rebootDeviceBtn) this.elements.rebootDeviceBtn.disabled = true;
+  }
+
+  sendHello() {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    this.ws.send(JSON.stringify({
+      type: MessageType.D2S_HELLO,
+      deviceId: this.deviceId,
+      clientType: this.clientType,
+      protocolVersion: this.protocolVersion,
+      capabilities: this.capabilities,
+      shellVersion: this.version,
+    }));
   }
 
   addEventListeners() {
@@ -408,10 +669,110 @@ class ShellRuntime {
     });
     
     this.elements.brightnessSlider.addEventListener('input', (e) => {
-      this.sendHardwareCommand('brightness', e.target.value);
+      this.onBrightnessChanged(e.target.value);
     });
 
+    if (this.elements.autoDimToggle) {
+      this.elements.autoDimToggle.addEventListener('change', (e) => {
+        const enabled = !!e.target.checked;
+        this.configManager.setSystemSetting('autoDim', enabled);
+        this.applySystemSettingsToUI();
+        // Apply immediately to the device. If disabling auto-dim, also apply stored brightness.
+        this.sendHardwareCommand('auto_dim', enabled ? '1' : '0');
+        if (!enabled) {
+          const b = this.configManager.systemSettings.brightness;
+          this.sendHardwareCommand('brightness', String(b));
+        }
+      });
+    }
+
+    if (this.elements.micToggle) {
+      this.elements.micToggle.addEventListener('change', (e) => {
+        const enabled = !!e.target.checked;
+        this.configManager.setSystemSetting('mic', enabled);
+        // Placeholder: we persist and optionally forward to server for future support.
+        this.sendHardwareCommand('mic', enabled ? '1' : '0');
+      });
+    }
+
+    if (this.elements.diagnosticsToggle && this.elements.diagnosticsSection) {
+      this.elements.diagnosticsToggle.addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        const isCollapsed = this.elements.diagnosticsSection.classList.toggle('collapsed');
+        this.elements.diagnosticsToggle.setAttribute('aria-expanded', String(!isCollapsed));
+      });
+    }
+
+    if (this.elements.restartChromiumBtn) {
+      this.elements.restartChromiumBtn.addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        this.sendHardwareCommand('restart_chromium', '1');
+        this.toggleSettings(false);
+      });
+    }
+
+    if (this.elements.rebootDeviceBtn) {
+      this.elements.rebootDeviceBtn.addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        this.sendHardwareCommand('reboot', '1');
+        this.toggleSettings(false);
+      });
+    }
+
     window.addEventListener('message', (event) => this.handleIframeMessage(event));
+  }
+
+  applySystemSettingsToUI() {
+    const s = this.configManager.systemSettings || {};
+    if (this.elements.autoDimToggle) {
+      this.elements.autoDimToggle.checked = !!s.autoDim;
+      this.elements.autoDimToggle.disabled = !this.isHardwareBackedShell;
+    }
+    if (this.elements.micToggle) {
+      this.elements.micToggle.checked = !!s.mic;
+      this.elements.micToggle.disabled = !this.isHardwareBackedShell;
+    }
+    if (this.elements.brightnessSlider) {
+      const b = Number(s.brightness || 128);
+      const clamped = Math.max(1, Math.min(255, b));
+      this.elements.brightnessSlider.value = String(clamped);
+      // Manual brightness is only meaningful when Auto-Dim is off (backlight daemon stopped).
+      this.elements.brightnessSlider.disabled = !this.isHardwareBackedShell || !!s.autoDim;
+      if (this.elements.brightnessValue) this.elements.brightnessValue.textContent = String(Math.round(clamped));
+    }
+    if (this.elements.restartChromiumBtn) this.elements.restartChromiumBtn.disabled = !this.isHardwareBackedShell;
+    if (this.elements.rebootDeviceBtn) this.elements.rebootDeviceBtn.disabled = !this.isHardwareBackedShell;
+  }
+
+  applySystemSettingsToDevice() {
+    if (!this.isHardwareBackedShell) return;
+    const s = this.configManager.systemSettings || {};
+    // Auto-Dim first (controls whether backlight daemon is running).
+    this.sendHardwareCommand('auto_dim', s.autoDim ? '1' : '0');
+    // Only set brightness if auto-dim is disabled.
+    if (!s.autoDim) this.sendHardwareCommand('brightness', String(s.brightness || 128));
+    // Forward mic state (server may ignore for now).
+    this.sendHardwareCommand('mic', s.mic ? '1' : '0');
+  }
+
+  onBrightnessChanged(value) {
+    const s = this.configManager.systemSettings || {};
+    const autoDim = !!s.autoDim;
+    const b = Number(value);
+    if (!Number.isFinite(b)) return;
+
+    const clamped = Math.max(1, Math.min(255, Math.round(b)));
+    this.configManager.setSystemSetting('brightness', clamped);
+    if (this.elements.brightnessValue) this.elements.brightnessValue.textContent = String(clamped);
+
+    // If auto-dim is enabled, brightness will be immediately overridden by ALS daemon.
+    if (autoDim) return;
+
+    // No delay: send on every input event (slider step controls how chatty this is).
+    // Avoid re-sending identical values.
+    if (this._brightnessLastSent === clamped) return;
+    this._brightnessLastSent = clamped;
+    this.sendHardwareCommand('brightness', String(clamped));
   }
 
   // ── Focus Recovery Safety Valve ──────────────────────────────────────────
@@ -445,6 +806,18 @@ class ShellRuntime {
     // Preset Shortcuts
     if (input.type === InputType.BUTTON) {
       const val = String(input.value).toLowerCase();
+
+      // System: physical Settings long press opens System Settings overlay
+      if (val === 'settings_long') {
+        this.focusZone = 'statusbar';
+        this.statusBarFocusIndex = this.statusBarItems.indexOf(this.elements.sysSettingsButton);
+        this.applyZoneFocus();
+        this.toggleSettings(true);
+        return;
+      }
+      if (val === 'settings_button_down') return this.handleSettingsButtonDown();
+      if (val === 'settings_button_up') return this.handleSettingsButtonUp();
+
       if (val === 'preset_1') return this.launchApp('counter');
       if (val === 'preset_2') return this.launchApp('makemkv-key');
       if (val === 'preset_4') return this.returnToHomeGrid();
@@ -574,6 +947,13 @@ class ShellRuntime {
   }
 
   handleBackButtonDown() {
+    // If settings are open, reserve back for closing the overlay.
+    if (this.elements.settingsOverlay && !this.elements.settingsOverlay.classList.contains('hidden')) {
+      this.isLongPress = false;
+      clearTimeout(this.backButtonTimer);
+      return;
+    }
+
     this.isLongPress = false;
     clearTimeout(this.backButtonTimer);
     
@@ -587,6 +967,14 @@ class ShellRuntime {
   }
 
   handleBackButtonUp() {
+    // Close settings first on back button release.
+    if (this.elements.settingsOverlay && !this.elements.settingsOverlay.classList.contains('hidden')) {
+      clearTimeout(this.backButtonTimer);
+      this.toggleSettings(false);
+      this.isLongPress = false;
+      return;
+    }
+
     clearTimeout(this.backButtonTimer);
     
     // If it wasn't a long press, do the normal back action
@@ -605,6 +993,26 @@ class ShellRuntime {
     this.isLongPress = false;
   }
 
+  handleSettingsButtonDown() {
+    this.isSettingsLongPress = false;
+    clearTimeout(this.settingsButtonTimer);
+
+    // Intentional long press only; avoids stealing the short press behavior.
+    this.settingsButtonTimer = setTimeout(() => {
+      this.isSettingsLongPress = true;
+      console.log('[Shell] Long Press detected: Opening System Settings');
+      this.focusZone = 'statusbar';
+      this.statusBarFocusIndex = this.statusBarItems.indexOf(this.elements.sysSettingsButton);
+      this.applyZoneFocus();
+      this.toggleSettings(true);
+    }, 650);
+  }
+
+  handleSettingsButtonUp() {
+    clearTimeout(this.settingsButtonTimer);
+    this.isSettingsLongPress = false;
+  }
+
   launchApp(appId) {
     // ── Cleanup previous app (memory-leak prevention) ──────────────────
     this._teardownCurrentApp();
@@ -621,6 +1029,7 @@ class ShellRuntime {
     this.elements.appContainer.innerHTML = '';
     this.elements.appContainer.appendChild(iframe);
     this.currentApp = { id: appId, iframe, atRoot: true };
+    document.body.classList.add('app-open');
     
     this.elements.homeScreen.classList.remove('active');
     this.elements.appContainer.classList.add('active');
@@ -685,6 +1094,7 @@ class ShellRuntime {
   returnToHomeGrid() {
     this._teardownCurrentApp();
     this.currentApp = { id: null, iframe: null, atRoot: true };
+    document.body.classList.remove('app-open');
     this.elements.appContainer.classList.remove('active');
     this.elements.homeScreen.classList.add('active');
     
@@ -720,7 +1130,11 @@ class ShellRuntime {
 
     // Sort apps according to ConfigManager's persisted order
     const orderedIds  = this.configManager.syncOrder(enabledIds);
-    const appMap      = Object.fromEntries(enabledApps.map(a => [a.id, a]));
+    // Build map manually (Object.fromEntries is ES2019, too new for Chromium 69)
+    const appMap = {};
+    enabledApps.forEach(app => {
+      appMap[app.id] = app;
+    });
     const sortedApps  = orderedIds.map(id => appMap[id]).filter(Boolean);
 
     // Clamp focus index to avoid out-of-bounds on refresh (e.g. if an app was removed)
@@ -808,26 +1222,22 @@ class ShellRuntime {
    * Also toggles a dimmed appearance when the app is at its root level.
    */
   updateNavIcon(atRoot) {
-    const icon = this.elements.sysNavButton.querySelector('.shell-icon');
+    const icon = this.elements.sysNavButton.querySelector('.material-symbols-outlined');
     if (icon) {
-      if (atRoot) {
-        // Apps icon SVG path
-        icon.innerHTML = '<path d="M160-160v-240h240v240H160Zm0-400v-240h240v240H160Zm400 400v-240h240v240H560Zm0-400v-240h240v240H560Z"/>';
-      } else {
-        // Back icon SVG path
-        icon.innerHTML = '<path d="M400-80 0-480l400-400 71 71-329 329 329 329-71 71Z"/>';
-      }
+      icon.textContent = atRoot ? 'apps' : 'arrow_back_ios_new';
     }
     this.elements.sysNavButton.classList.toggle('at-root', atRoot);
   }
 
   startClock() {
     const update = () => {
-      // Adjusted time based on server sync
-      const now = new Date(Date.now() + this.serverTimeOffset);
+      // Adjusted time based on server sync and server's timezone
+      // We subtract the server's TZ offset (in minutes) to shift UTC to Server Local
+      // then use getUTC methods to avoid the device's own local TZ shift.
+      const now = new Date(Date.now() + this.serverTimeOffset - (this.serverTzOffset * 60000));
       
-      let h = now.getHours();
-      const m = now.getMinutes().toString().padStart(2, '0');
+      let h = now.getUTCHours();
+      const m = now.getUTCMinutes().toString().padStart(2, '0');
       const ampm = h >= 12 ? 'PM' : 'AM';
       
       // Convert to 12h format
@@ -835,6 +1245,7 @@ class ShellRuntime {
       h = h ? h : 12; 
       
       this.elements.statusTime.textContent = `${h}:${m} ${ampm}`;
+      this.elements.statusTime.style.color = ''; // Reset to default (white)
     };
     setInterval(update, 1000);
     update();
@@ -843,12 +1254,53 @@ class ShellRuntime {
   toggleSettings(show) {
     if (show) {
       this.elements.settingsOverlay.classList.remove('hidden');
+      this.startInputHealthPolling();
+      this.refreshInputHealth();
     } else {
       this.elements.settingsOverlay.classList.add('hidden');
+      this.stopInputHealthPolling();
+    }
+  }
+
+  startInputHealthPolling() {
+    if (this.inputHealthPollTimer) return;
+    this.inputHealthPollTimer = setInterval(() => this.refreshInputHealth(), 3000);
+  }
+
+  stopInputHealthPolling() {
+    if (!this.inputHealthPollTimer) return;
+    clearInterval(this.inputHealthPollTimer);
+    this.inputHealthPollTimer = null;
+  }
+
+  async refreshInputHealth() {
+    if (!this.elements.diagServerLink) return;
+    const wsConnected = !!(this.ws && this.ws.readyState === WebSocket.OPEN);
+    this.elements.diagServerLink.textContent = wsConnected ? 'Connected' : 'Disconnected';
+    try {
+      const res = await fetch('/api/input/health');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const payload = await res.json();
+      const h = payload && payload.health ? payload.health : null;
+      this.elements.diagQueueSize.textContent = h ? String(h.queueSize) : '--';
+      this.elements.diagSendFailures.textContent = h && h.stats ? String(h.stats.sendFailures || 0) : '--';
+      this.elements.diagMonitorCount.textContent = h ? String(h.monitorCount) : '--';
+      if (h && h.receivedAt) {
+        const ageSec = Math.max(0, Math.floor((Date.now() - h.receivedAt) / 1000));
+        this.elements.diagLastUpdate.textContent = `${ageSec}s ago`;
+      } else {
+        this.elements.diagLastUpdate.textContent = '--';
+      }
+    } catch {
+      this.elements.diagQueueSize.textContent = '--';
+      this.elements.diagSendFailures.textContent = '--';
+      this.elements.diagMonitorCount.textContent = '--';
+      this.elements.diagLastUpdate.textContent = '--';
     }
   }
 
   sendHardwareCommand(command, value) {
+    if (!this.isHardwareBackedShell) return;
     console.log(`[Shell] Sending hardware command: ${command} = ${value}`);
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({
@@ -868,7 +1320,10 @@ class ShellRuntime {
   }
 }
 
-document.addEventListener('DOMContentLoaded', () => { window.shell = new ShellRuntime(); });
+document.addEventListener('DOMContentLoaded', () => {
+  loadMaterialSymbolsFont();
+  window.shell = new ShellRuntime();
+});
 
 // ─── Heap Monitor (DevTools diagnostic) ─────────────────────────────────────
 // Paste into console or enable with: shell.startHeapMonitor()
