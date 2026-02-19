@@ -11,5 +11,21 @@
       "deviceClass": "desktop",
       "ip": "::1"
     }
+  },
+  {
+    "id": "bootstrap-probe-test",
+    "connected": false,
+    "lastSeen": 1771478942256,
+    "inputs": [],
+    "clientInfo": {
+      "userAgent": "",
+      "browser": "Unknown",
+      "platform": "Unknown",
+      "deviceClass": "desktop",
+      "ip": "::ffff:127.0.0.1"
+    },
+    "clientType": "unknown",
+    "protocolVersion": null,
+    "capabilities": {}
   }
 ]

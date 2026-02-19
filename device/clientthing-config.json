@@ -1,8 +1,0 @@
-{
-  "endpoints": [
-    "http://127.0.0.1:3000",
-    "http://172.16.42.1:3000"
-  ],
-  "shellPath": "/shell/index.html?client=carthing",
-  "wsProbePath": "/ws/device?id=bootstrap-probe"
-}

@@ -1,9 +1,21 @@
 const { exec } = require('child_process');
 const os = require('os');
+const fs = require('fs');
+const path = require('path');
 
 class ADBManager {
   constructor() {
     this.adbPath = 'adb'; // Assumes adb is in PATH
+  }
+
+  /**
+   * Resolves the first existing local file path from a list of candidates.
+   */
+  resolveFirstExistingPath(label, candidates) {
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) return candidate;
+    }
+    throw new Error(`[ADB] Missing required provisioning asset (${label}). Tried: ${candidates.join(', ')}`);
   }
 
   /**
@@ -64,14 +76,30 @@ class ADBManager {
       await this.setupReverse(serverPort, deviceId);
 
       // 3. Push ClientThing runtime assets from local device staging.
-      const path = require('path');
-      const deviceDir = path.join(__dirname, '..', 'device');
-      const startupPath = path.join(deviceDir, 'shell-bootstrap.html');
-      const splashPath = path.join(__dirname, '..', 'appstart.png');
-      const bridgeJsPath = path.join(deviceDir, 'inputd.js');
-      const bridgeRunPath = path.join(deviceDir, 'run-inputd.sh');
-      const bridgeConfigPath = path.join(deviceDir, 'clientthing-config.json');
-      const bridgeSupervisorConfPath = path.join(__dirname, '..', 'supervisord.conf');
+      const repoRoot = path.join(__dirname, '..');
+      const firmwareRoot = path.join(repoRoot, 'ClientThing-firmware');
+      const firmwareAssetsDir = path.join(firmwareRoot, 'firmware', 'clientthing-assets');
+
+      const startupPath = this.resolveFirstExistingPath('shell-bootstrap.html', [
+        path.join(firmwareAssetsDir, 'shell-bootstrap.html'),
+      ]);
+      const splashPath = this.resolveFirstExistingPath('appstart.png', [
+        path.join(repoRoot, 'appstart.png'),
+        path.join(firmwareRoot, 'appstart.png'),
+        path.join(firmwareAssetsDir, 'appstart.png'),
+      ]);
+      const bridgeJsPath = this.resolveFirstExistingPath('inputd.js', [
+        path.join(firmwareRoot, 'device', 'inputd.js'),
+        path.join(firmwareAssetsDir, 'inputd.js'),
+      ]);
+      const bridgeRunPath = this.resolveFirstExistingPath('run-inputd.sh', [
+        path.join(firmwareRoot, 'device', 'run-inputd.sh'),
+        path.join(firmwareAssetsDir, 'run-inputd.sh'),
+      ]);
+      const bridgeConfigPath = this.resolveFirstExistingPath('clientthing-config.json', [
+        path.join(firmwareAssetsDir, 'clientthing-config.json'),
+      ]);
+      const bridgeSupervisorConfPath = path.join(repoRoot, 'supervisord.conf');
 
       // 4. Push all provisioned files to /usr/share/clientthing.
       await this.runCommand('shell "mkdir -p /usr/share/clientthing"', deviceId);
