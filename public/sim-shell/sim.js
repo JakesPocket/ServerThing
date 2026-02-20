@@ -73,12 +73,6 @@
     deviceImage.addEventListener('load', updateFrameScale);
   }
 
-  // ── Prevent Context Menu on Sim Controls ──────────────────────────────
-
-  deviceFrame.addEventListener('contextmenu', e => e.preventDefault());
-  const touchPanel = document.getElementById('touch-panel');
-  if (touchPanel) touchPanel.addEventListener('contextmenu', e => e.preventDefault());
-
   // ═════════════════════════════════════════════════════════════════════
   //  LONG-PRESS HELPER
   //  Used by all hardware buttons.
@@ -128,8 +122,6 @@
       if (isLong && onRelease) onRelease();
       isLong = false;
     });
-
-    el.addEventListener('contextmenu', e => e.preventDefault());
   }
 
   // ═════════════════════════════════════════════════════════════════════

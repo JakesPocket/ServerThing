@@ -16,7 +16,6 @@ html, body {
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  user-select: none;
 }
 
 /* ─── Simulator Container ───────────────────────────────────────────────── */
@@ -151,7 +150,6 @@ html, body {
   border-radius: 4px;
   white-space: nowrap;
   pointer-events: none;
-  user-select: none;
   line-height: 1.3;
   transition: color 0.12s, background 0.12s;
 }

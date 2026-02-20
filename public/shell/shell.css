@@ -80,8 +80,6 @@ html, body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background: #000;
   color: #fff;
-  user-select: none;
-  -webkit-user-select: none;
   -webkit-tap-highlight-color: transparent;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -765,7 +763,6 @@ body:not(.material-font-loaded) .material-symbols-outlined {
   font-size: 1.05rem;
   font-weight: 600;
   cursor: pointer;
-  user-select: none;
   -webkit-tap-highlight-color: transparent;
 }
 
