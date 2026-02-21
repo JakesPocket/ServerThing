@@ -12,10 +12,8 @@ services:
     environment:
       - PORT=3000
       - NODE_ENV=production
-      # Keep this path aligned with the mounted SSH key below.
-      - MAKEMKV_SSH_KEY_PATH=/run/keys/serverthing_makemkv
     volumes:
       # Persist discovered device data and server state.
       - ./data:/app/data
-      # Read-only SSH key used for remote MakeMKV host commands.
-      - /opt/serverthing/.ssh/serverthing_makemkv:/run/keys/serverthing_makemkv:ro
+      # Optional legacy SSH key mount (only needed when MAKEMKV_API_BASE_URL is unset):
+      # - /opt/serverthing/.ssh/serverthing_makemkv:/run/keys/serverthing_makemkv:ro
