@@ -6,6 +6,7 @@ services:
       ARM_SIDECAR_API_KEY: ${ARM_SIDECAR_API_KEY}
       ARM_SETTINGS_PATH: ${ARM_SETTINGS_PATH:-/arm/settings/settings.conf}
       ARM_LOGS_DIR: ${ARM_LOGS_DIR:-/arm/logs}
+      ARM_PROGRESS_LOGS_DIR: ${ARM_PROGRESS_LOGS_DIR:-/arm/logs/progress}
       ARM_ARM_LOG_PATH: ${ARM_ARM_LOG_PATH:-/arm/logs/arm.log}
       ARM_TRANSCODE_LOG_PATH: ${ARM_TRANSCODE_LOG_PATH:-/arm/logs/transcode.log}
       ARM_SIDECAR_DATA_DIR: /app/data

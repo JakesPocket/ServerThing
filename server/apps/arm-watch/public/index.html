@@ -114,6 +114,11 @@
       box-shadow: inset 0 0 0 1px rgba(255, 111, 111, 0.2);
     }
 
+    .status-bar.active {
+      border-color: var(--accent);
+      box-shadow: inset 0 0 0 1px rgba(62, 164, 255, 0.25);
+    }
+
     .status-message {
       flex: 1;
       display: flex;
@@ -127,6 +132,7 @@
     .status-bar.good .status-message { color: var(--good); }
     .status-bar.warn .status-message { color: var(--warn); }
     .status-bar.bad .status-message { color: var(--bad); }
+    .status-bar.active .status-message { color: var(--accent); }
 
     .update-key-btn {
       min-width: 170px;
@@ -189,6 +195,7 @@
     .poster.status-good { border-color: var(--good); }
     .poster.status-warn { border-color: var(--warn); }
     .poster.status-bad { border-color: var(--bad); }
+    .poster.status-active { border-color: var(--accent); }
 
     .poster img {
       width: 100%;
@@ -219,6 +226,18 @@
     .poster-status.good { background: var(--good); }
     .poster-status.warn { background: var(--warn); }
     .poster-status.bad { background: var(--bad); }
+    .poster-status.ripping { background: var(--accent); color: #e9f3ff; animation: status-spin 1s linear infinite; }
+    .poster-status.transcoding { background: #7db8ff; color: #0f1a2b; animation: status-pulse 1.2s ease-in-out infinite; }
+
+    @keyframes status-spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    @keyframes status-pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.08); }
+    }
 
     .details {
       display: flex;

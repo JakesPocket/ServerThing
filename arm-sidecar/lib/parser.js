@@ -158,6 +158,15 @@ function parseRipLog(text) {
   let progressPct = (prgvProgressPct !== null) ? prgvProgressPct : parsePercent(text);
   let etaSec = parseEtaSec(text);
 
+  // ARM can have an active job even when PRGV has reached 100% for the last
+  // sampled task (e.g., waiting for manual override/next phase).
+  const armJobRunning = /Job\\s*#\\d+\\s+with\\s+PID\\s+\\d+\\s+is\\s+currently\\s+running|Waiting\\s+\\d+\\s+seconds\\s+for\\s+manual\\s+override/i.test(String(text));
+  const armJobEnded = /Finished\\s+ARM\\s+processing|ARM\\s+processing\\s+completed|completed\\s+successfully|all\\s+done|job\\s+complete/i.test(String(text));
+  if (armJobRunning && !armJobEnded) {
+    phase = 'ripping';
+    if (progressPct === 100) progressPct = null;
+  }
+
   const armEvents = [];
   const lines = String(text).split(/\r?\n/);
   let ripStartTs = NaN;
@@ -220,7 +229,9 @@ function parseRipLog(text) {
   const parsedDisc = extractTitleMetadata(rawDiscLabel);
 
   return {
-    active: prgvProgressPct !== null ? effectiveActive : phase === 'ripping',
+    active: armJobRunning && !armJobEnded
+      ? true
+      : (prgvProgressPct !== null ? effectiveActive : phase === 'ripping'),
     title: parsedTitle.title || rawTitle,
     discLabel: parsedDisc.title || rawDiscLabel,
     titleYear: parsedTitle.year || parsedDisc.year || '',

@@ -12,6 +12,7 @@ services:
       ARM_SIDECAR_MODE: ${ARM_SIDECAR_MODE:-mock}
       ARM_SETTINGS_PATH: ${ARM_SETTINGS_PATH:-/home/me/docker/acquisition/arm/.MakeMKV/settings.conf}
       ARM_LOGS_DIR: ${ARM_LOGS_DIR:-/home/me/docker/acquisition/arm/logs}
+      ARM_PROGRESS_LOGS_DIR: ${ARM_PROGRESS_LOGS_DIR:-/home/me/docker/acquisition/arm/logs/progress}
       ARM_ARM_LOG_PATH: ${ARM_ARM_LOG_PATH:-/home/me/docker/acquisition/arm/logs/arm.log}
       ARM_TRANSCODE_LOG_PATH: ${ARM_TRANSCODE_LOG_PATH:-/home/me/docker/acquisition/arm/logs/transcode.log}
       ARM_SSH_HOST: ${ARM_SSH_HOST:-10.0.0.10}

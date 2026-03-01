@@ -20,6 +20,7 @@ const cfg = {
   apiKey: String(process.env.ARM_SIDECAR_API_KEY || '').trim(),
   settingsPath: process.env.ARM_SETTINGS_PATH || '/arm/settings/settings.conf',
   logsDir: process.env.ARM_LOGS_DIR || '/arm/logs',
+  progressLogsDir: process.env.ARM_PROGRESS_LOGS_DIR || '/arm/logs/progress',
   armLogPath: process.env.ARM_ARM_LOG_PATH || '/arm/logs/arm.log',
   transcodeLogPath: process.env.ARM_TRANSCODE_LOG_PATH || '/arm/logs/transcode.log',
   dataDir: process.env.ARM_SIDECAR_DATA_DIR || '/app/data',
@@ -149,8 +150,7 @@ async function detectLatestRemoteLog(logsDir) {
   return (out || '').trim();
 }
 
-async function detectLatestRemoteProgressLog(logsDir) {
-  const progressDir = `${logsDir.replace(/\/+$/, '')}/progress`;
+async function detectLatestRemoteProgressLog(progressDir) {
   const cmd =
     `find ${shSingleQuote(progressDir)} -maxdepth 1 -type f -name '*.log' ` +
     `-printf '%T@ %p\\n' 2>/dev/null | sort -nr | head -n 1 | cut -d' ' -f2-`;
@@ -182,8 +182,7 @@ async function buildLiveTelemetry() {
   );
   const latestJobLogText = latestJobLogPath ? await readTextIfExists(latestJobLogPath) : '';
 
-  const progressDir = path.join(cfg.logsDir, 'progress');
-  const latestProgressLogPath = await detectLatestFile(progressDir, (name) => name.endsWith('.log'));
+  const latestProgressLogPath = await detectLatestFile(cfg.progressLogsDir, (name) => name.endsWith('.log'));
   const progressLogText = latestProgressLogPath ? await readTextIfExists(latestProgressLogPath) : '';
 
   const transcodeLogText = await readTextIfExists(cfg.transcodeLogPath);
@@ -227,7 +226,7 @@ async function buildSshTelemetry() {
   const latestJobLogPath = await detectLatestRemoteLog(cfg.logsDir);
   const latestJobLogText = latestJobLogPath ? await readRemoteFile(latestJobLogPath) : '';
 
-  const latestProgressLogPath = await detectLatestRemoteProgressLog(cfg.logsDir);
+  const latestProgressLogPath = await detectLatestRemoteProgressLog(cfg.progressLogsDir);
   const progressLogText = latestProgressLogPath ? await readRemoteFile(latestProgressLogPath) : '';
 
   const transcodeLogText = await readRemoteFile(cfg.transcodeLogPath);
@@ -311,19 +310,23 @@ app.get('/healthz', async (req, res) => {
     apiKeyConfigured: Boolean(cfg.apiKey),
     settingsPath: cfg.settingsPath,
     logsDir: cfg.logsDir,
+    progressLogsDir: cfg.progressLogsDir,
     settingsReadable: false,
     logsReadable: false,
+    progressLogsReadable: false,
   };
 
   if (cfg.mode === 'mock') {
     checks.settingsReadable = true;
     checks.logsReadable = true;
+    checks.progressLogsReadable = true;
     return res.json({ ok: true, ...checks });
   }
 
   if (cfg.mode === 'ssh') {
     checks.settingsPath = `${cfg.sshUser}@${cfg.sshHost}:${cfg.settingsPath}`;
     checks.logsDir = `${cfg.sshUser}@${cfg.sshHost}:${cfg.logsDir}`;
+    checks.progressLogsDir = `${cfg.sshUser}@${cfg.sshHost}:${cfg.progressLogsDir}`;
     try {
       await runSsh(`test -r ${shSingleQuote(cfg.settingsPath)} && echo ok`);
       checks.settingsReadable = true;
@@ -336,7 +339,13 @@ app.get('/healthz', async (req, res) => {
     } catch {
       checks.logsReadable = false;
     }
-    const ok = checks.apiKeyConfigured && checks.settingsReadable && checks.logsReadable;
+    try {
+      await runSsh(`test -d ${shSingleQuote(cfg.progressLogsDir)} && test -r ${shSingleQuote(cfg.progressLogsDir)} && echo ok`);
+      checks.progressLogsReadable = true;
+    } catch {
+      checks.progressLogsReadable = false;
+    }
+    const ok = checks.apiKeyConfigured && checks.settingsReadable && checks.logsReadable && checks.progressLogsReadable;
     return res.status(ok ? 200 : 503).json({ ok, ...checks });
   }
 
@@ -353,8 +362,14 @@ app.get('/healthz', async (req, res) => {
   } catch {
     checks.logsReadable = false;
   }
+  try {
+    await fs.promises.access(cfg.progressLogsDir, fs.constants.R_OK);
+    checks.progressLogsReadable = true;
+  } catch {
+    checks.progressLogsReadable = false;
+  }
 
-  const ok = checks.apiKeyConfigured && checks.settingsReadable && checks.logsReadable;
+  const ok = checks.apiKeyConfigured && checks.settingsReadable && checks.logsReadable && checks.progressLogsReadable;
   return res.status(ok ? 200 : 503).json({ ok, ...checks });
 });
 

@@ -9,6 +9,7 @@ services:
       ARM_SIDECAR_MODE: live
       ARM_SETTINGS_PATH: /arm/settings/settings.conf
       ARM_LOGS_DIR: /arm/logs
+      ARM_PROGRESS_LOGS_DIR: /arm/logs/progress
       ARM_ARM_LOG_PATH: /arm/logs/arm.log
       ARM_TRANSCODE_LOG_PATH: /arm/logs/transcode.log
     volumes:

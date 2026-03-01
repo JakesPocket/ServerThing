@@ -146,6 +146,18 @@ class ArmWatchApp {
   }
 
   renderStatusBar(data) {
+    const active = this.isActiveMode(data);
+    if (active) {
+      this.applyToneClass(this.elements.statusBar, 'status-bar', 'active');
+      this.elements.statusMessage.textContent = data.state === 'transcoding'
+        ? 'Transcoding in Progress'
+        : 'Ripping in Progress';
+      this.elements.updateKeyBtn.classList.remove('visible');
+      this.elements.updateKeyBtn.disabled = false;
+      this.elements.updateKeyBtn.textContent = 'Update Key';
+      return;
+    }
+
     const tone = this.toneFromKeyStatus(data.keyStatus || {});
     this.applyToneClass(this.elements.statusBar, 'status-bar', tone);
     this.elements.statusMessage.textContent = data.keyStatus?.message || 'Key status unavailable';
@@ -157,12 +169,32 @@ class ArmWatchApp {
   }
 
   renderPosterState(data) {
+    const activeRip = data.state === 'ripping' || Boolean(data.rip?.active);
+    const activeTranscode = data.state === 'transcoding' || Boolean(data.transcode?.active);
+
+    if (activeRip) {
+      this.applyToneClass(this.elements.posterBox, 'poster', 'status-active');
+      this.applyToneClass(this.elements.posterStatus, 'poster-status', 'ripping');
+      this.elements.posterStatus.textContent = '◉';
+      this.elements.posterStatus.title = 'Ripping in progress';
+      return;
+    }
+
+    if (activeTranscode) {
+      this.applyToneClass(this.elements.posterBox, 'poster', 'status-active');
+      this.applyToneClass(this.elements.posterStatus, 'poster-status', 'transcoding');
+      this.elements.posterStatus.textContent = '◉↺';
+      this.elements.posterStatus.title = 'Transcoding in progress';
+      return;
+    }
+
     const tone = this.toneFromKeyStatus(data.keyStatus || {});
     this.applyToneClass(this.elements.posterBox, 'poster', `status-${tone}`);
 
     const symbol = tone === 'good' ? '✓' : (tone === 'bad' ? 'X' : '-');
     this.applyToneClass(this.elements.posterStatus, 'poster-status', tone);
     this.elements.posterStatus.textContent = symbol;
+    this.elements.posterStatus.title = '';
   }
 
   renderPoster(media) {

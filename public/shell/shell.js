@@ -74,6 +74,7 @@ function loadMaterialSymbolsFont() {
 // order, display-name overrides, and icon overrides.
 class ConfigManager {
   static get STORAGE_KEY() { return 'serverthing-shell-config'; }
+  static get SETTINGS_SCHEMA_VERSION() { return 2; }
 
   constructor() {
     this._data = this._load();
@@ -142,19 +143,36 @@ class ConfigManager {
   // ── Persistence ─────────────────────────────────────────────────────────
 
   _load() {
+    const normalizeSystemSettings = (systemSettings, storedSchemaVersion) => {
+      // Safe-boot migration:
+      // Older configs defaulted auto-dim to ON, which can blank the screen on boot.
+      // From schema v2 onward, default to auto-dim OFF unless user explicitly enables it.
+      const migratedFromLegacy =
+        !Number.isFinite(Number(storedSchemaVersion)) ||
+        Number(storedSchemaVersion) < ConfigManager.SETTINGS_SCHEMA_VERSION;
+
+      const raw = (systemSettings && typeof systemSettings === 'object') ? systemSettings : {};
+      const brightness = Number(raw.brightness);
+      const hasAutoDimValue = typeof raw.autoDim === 'boolean';
+
+      return {
+        autoDim: migratedFromLegacy ? false : (hasAutoDimValue ? raw.autoDim : false),
+        brightness: Number.isFinite(brightness) ? Math.max(1, Math.min(255, Math.round(brightness))) : 128,
+        mic: !!raw.mic,
+      };
+    };
+
     try {
       const raw = localStorage.getItem(ConfigManager.STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
+        const systemSettings = normalizeSystemSettings(parsed.systemSettings, parsed.settingsSchemaVersion);
         return {
           appOrder:      Array.isArray(parsed.appOrder) ? parsed.appOrder : [],
           nameOverrides: parsed.nameOverrides || {},
           iconOverrides: parsed.iconOverrides || {},
-          systemSettings: parsed.systemSettings || {
-            autoDim: true,
-            brightness: 128,
-            mic: false,
-          },
+          systemSettings,
+          settingsSchemaVersion: ConfigManager.SETTINGS_SCHEMA_VERSION,
         };
       }
     } catch (e) {
@@ -164,7 +182,8 @@ class ConfigManager {
       appOrder: [],
       nameOverrides: {},
       iconOverrides: {},
-      systemSettings: { autoDim: true, brightness: 128, mic: false },
+      systemSettings: { autoDim: false, brightness: 128, mic: false },
+      settingsSchemaVersion: ConfigManager.SETTINGS_SCHEMA_VERSION,
     };
   }
 
