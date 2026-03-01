@@ -6,13 +6,23 @@ const readline = require('readline');
 
 const POSTER_TTL_MS = 6 * 60 * 60 * 1000;
 const posterCache = new Map();
-const INTERNET_KEY_SOURCE_URL_DEFAULT = 'https://forum.makemkv.com/forum/viewtopic.php?f=5&t=1053';
+const INTERNET_KEY_SOURCE_URL_DEFAULT = 'https://cable.ayra.ch/makemkv/api.php?json';
+const INTERNET_KEY_SOURCE_URL_BACKUP = 'https://forum.makemkv.com/forum/viewtopic.php?f=5&t=1053';
 const INTERNET_KEY_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const MAX_HISTORY_ITEMS = 120;
+const HISTORY_FILE_PATH = path.join(__dirname, '..', '..', '..', 'data', 'makemkv-history.json');
 let internetKeyCache = {
   fetchedAt: 0,
   internetKey: '',
   internetExpiry: '',
   fetchError: '',
+  keyRecords: [],
+};
+let ripHistoryCache = null;
+let runtimeRipTracker = {
+  active: false,
+  lastTitle: '',
+  lastPosterUrl: '',
 };
 
 function isReadableFile(filePath) {
@@ -48,9 +58,12 @@ function resolveSshKeyPath() {
 function getConfig() {
   const defaultLogsDir = '/home/me/docker/acquisition/arm/logs';
   const defaultArmLogPath = `${defaultLogsDir}/arm.log`;
+  const sidecarDefaultEnabled = String(process.env.ST_USE_ARM_SIDECAR_DEFAULT || '').toLowerCase() === '1'
+    || String(process.env.ST_USE_ARM_SIDECAR_DEFAULT || '').toLowerCase() === 'true';
+  const sidecarDefaultUrl = process.env.ST_ARM_SIDECAR_BASE_URL || 'http://arm-sidecar:8080';
   return {
     apiMode: (process.env.MAKEMKV_API_MODE || '').trim().toLowerCase(),
-    apiBaseUrl: process.env.MAKEMKV_API_BASE_URL || '',
+    apiBaseUrl: process.env.MAKEMKV_API_BASE_URL || (sidecarDefaultEnabled ? sidecarDefaultUrl : ''),
     apiKey: process.env.MAKEMKV_API_KEY || process.env.ARM_API_KEY || '',
     armJsonPath: process.env.MAKEMKV_ARM_JSON_PATH || '/json',
     apiTelemetryPath: process.env.MAKEMKV_API_TELEMETRY_PATH || '/api/serverthing/telemetry',
@@ -65,7 +78,7 @@ function getConfig() {
     transcodeLogPath: process.env.MAKEMKV_TRANSCODE_LOG_PATH || '/home/me/docker/acquisition/arm/logs/transcode.log',
     logsDir: process.env.MAKEMKV_LOGS_DIR || path.dirname(process.env.MAKEMKV_RIP_LOG_PATH || defaultArmLogPath),
     internetExpiry: process.env.MAKEMKV_INTERNET_EXPIRY || '2026-03-31',
-    internetKeySourceUrl: process.env.MAKEMKV_INTERNET_KEY_SOURCE_URL || INTERNET_KEY_SOURCE_URL_DEFAULT,
+    internetKeySourceUrl: INTERNET_KEY_SOURCE_URL_DEFAULT,
     omdbKey: process.env.OMDB_API_KEY || '',
   };
 }
@@ -139,23 +152,222 @@ function parseIsoDate(input) {
   return new Date(ts).toISOString().slice(0, 10);
 }
 
-function extractInternetKeyFromHtml(html) {
-  const matches = Array.from(String(html || '').matchAll(/T-[A-Za-z0-9@]+/g));
-  if (matches.length === 0) return { key: '', index: -1 };
-  // Prefer longest token to avoid partial matches.
-  const best = matches.sort((a, b) => (b[0].length - a[0].length))[0];
-  return { key: best[0], index: best.index ?? -1 };
+function startOfUtcDayTs(ts = Date.now()) {
+  const d = new Date(ts);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 }
 
-function extractExpiryNearKey(html, keyIndex) {
-  const text = String(html || '');
-  const idx = Number.isFinite(keyIndex) && keyIndex >= 0 ? keyIndex : 0;
-  const window = text.slice(Math.max(0, idx - 600), idx + 1200);
-  const iso = window.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
-  if (iso && iso[1]) return iso[1];
-  const long = window.match(/\b([A-Z][a-z]{2,8}\s+\d{1,2},\s*20\d{2})\b/);
-  if (long && long[1]) return parseIsoDate(long[1]);
-  return '';
+function daysDeltaFromToday(isoDate) {
+  const normalized = parseIsoDate(isoDate);
+  if (!normalized) return null;
+  const target = Date.parse(`${normalized}T00:00:00Z`);
+  if (!Number.isFinite(target)) return null;
+  const today = startOfUtcDayTs(Date.now());
+  return Math.floor((target - today) / (24 * 60 * 60 * 1000));
+}
+
+function formatDaysFuture(days) {
+  if (!Number.isFinite(days)) return 'unknown days';
+  if (days <= 0) return 'today';
+  return `${days} day${days === 1 ? '' : 's'}`;
+}
+
+function formatDaysPast(days) {
+  if (!Number.isFinite(days)) return 'unknown days';
+  const abs = Math.abs(days);
+  if (abs === 0) return 'today';
+  return `${abs} day${abs === 1 ? '' : 's'} ago`;
+}
+
+function titleForHistory(value) {
+  const normalized = extractTitleMetadata(String(value || '')).title || String(value || '');
+  const trimmed = normalized.trim();
+  if (!trimmed) return '';
+  if (/^no active media$/i.test(trimmed)) return '';
+  if (isUnknownLabel(trimmed)) return '';
+  return trimmed;
+}
+
+function ensureHistoryLoaded() {
+  if (ripHistoryCache) return ripHistoryCache;
+  let items = [];
+  try {
+    const text = fs.readFileSync(HISTORY_FILE_PATH, 'utf8');
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed?.items)) {
+      items = parsed.items
+        .filter((v) => v && typeof v === 'object')
+        .map((v) => ({
+          id: String(v.id || ''),
+          title: String(v.title || '').trim(),
+          posterUrl: String(v.posterUrl || '').trim(),
+          completedAt: Number(v.completedAt || 0),
+          status: 'completed',
+        }))
+        .filter((v) => v.title && Number.isFinite(v.completedAt) && v.completedAt > 0);
+    }
+  } catch {
+    items = [];
+  }
+  ripHistoryCache = items.slice(0, MAX_HISTORY_ITEMS);
+  return ripHistoryCache;
+}
+
+function persistHistory(items) {
+  try {
+    const dir = path.dirname(HISTORY_FILE_PATH);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(HISTORY_FILE_PATH, JSON.stringify({ items }, null, 2));
+  } catch {
+    // Best-effort persistence; UI should continue even if filesystem write fails.
+  }
+}
+
+function addHistoryItem(title, posterUrl = '') {
+  const cleanTitle = titleForHistory(title);
+  if (!cleanTitle) return;
+
+  const items = ensureHistoryLoaded();
+  const now = Date.now();
+  const key = cleanTitle.toLowerCase();
+  const duplicate = items.find((item) => item.title.toLowerCase() === key && (now - item.completedAt) < 60 * 60 * 1000);
+  if (duplicate) return;
+
+  const entry = {
+    id: `${now}-${Math.random().toString(36).slice(2, 8)}`,
+    title: cleanTitle,
+    posterUrl: String(posterUrl || '').trim(),
+    completedAt: now,
+    status: 'completed',
+  };
+  const next = [entry, ...items].slice(0, MAX_HISTORY_ITEMS);
+  ripHistoryCache = next;
+  persistHistory(next);
+}
+
+function updateRipHistoryFromTelemetry({ rip, transcode, media }) {
+  const active = Boolean(rip?.active) || Boolean(transcode?.active);
+  const currentTitle = titleForHistory(rip?.title || media?.title || rip?.discLabel || '');
+  const currentPoster = String(media?.posterUrl || '').trim();
+
+  if (active) {
+    runtimeRipTracker.active = true;
+    if (currentTitle) runtimeRipTracker.lastTitle = currentTitle;
+    if (currentPoster) runtimeRipTracker.lastPosterUrl = currentPoster;
+    return;
+  }
+
+  if (runtimeRipTracker.active) {
+    addHistoryItem(runtimeRipTracker.lastTitle || currentTitle, runtimeRipTracker.lastPosterUrl || currentPoster);
+    runtimeRipTracker.active = false;
+    runtimeRipTracker.lastTitle = '';
+    runtimeRipTracker.lastPosterUrl = '';
+  }
+}
+
+function getRipHistory() {
+  return ensureHistoryLoaded();
+}
+
+function collectKeyRecords(value, out = []) {
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectKeyRecords(item, out));
+    return out;
+  }
+  if (!value || typeof value !== 'object') return out;
+
+  const entries = Object.entries(value);
+  const keyEntry = entries.find(([k, v]) => /(key|beta)/i.test(k) && typeof v === 'string' && /T-[A-Za-z0-9@]+/.test(v));
+  const expiryEntry = entries.find(([k, v]) =>
+    /(exp|valid|until|date)/i.test(k) &&
+    (typeof v === 'string' || typeof v === 'number')
+  );
+  if (keyEntry) {
+    const keyToken = String(keyEntry[1]).match(/T-[A-Za-z0-9@]+/);
+    const expiryIso = parseIsoDate(expiryEntry ? String(expiryEntry[1]) : '');
+    out.push({ key: keyToken ? keyToken[0] : '', expiry: expiryIso });
+  }
+
+  entries.forEach(([, v]) => {
+    if (v && typeof v === 'object') collectKeyRecords(v, out);
+  });
+  return out;
+}
+
+function extractInternetReferenceFromJson(payload, fallbackExpiry) {
+  const records = collectKeyRecords(payload, []).filter((v) => v.key);
+  if (records.length > 0) {
+    const sorted = records.slice().sort((a, b) => {
+      const ad = Date.parse(`${a.expiry || '1970-01-01'}T00:00:00Z`);
+      const bd = Date.parse(`${b.expiry || '1970-01-01'}T00:00:00Z`);
+      return (Number.isFinite(bd) ? bd : 0) - (Number.isFinite(ad) ? ad : 0);
+    });
+    return {
+      internetKey: sorted[0].key,
+      internetExpiry: sorted[0].expiry || parseIsoDate(fallbackExpiry) || '',
+      keyRecords: sorted,
+    };
+  }
+
+  const raw = JSON.stringify(payload || {});
+  const tokenMatch = raw.match(/T-[A-Za-z0-9@]+/);
+  const dateMatch = raw.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
+  return {
+    internetKey: tokenMatch ? tokenMatch[0] : '',
+    internetExpiry: dateMatch ? dateMatch[1] : (parseIsoDate(fallbackExpiry) || ''),
+    keyRecords: [],
+  };
+}
+
+function extractInternetReferenceFromText(text, fallbackExpiry) {
+  const raw = String(text || '');
+  const keyMatch = raw.match(/T-[A-Za-z0-9@]+/);
+  const dateMatch = raw.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
+  return {
+    internetKey: keyMatch ? keyMatch[0] : '',
+    internetExpiry: dateMatch ? dateMatch[1] : (parseIsoDate(fallbackExpiry) || ''),
+    keyRecords: [],
+  };
+}
+
+async function fetchInternetReferenceFromUrl(url, fallbackExpiry, controller) {
+  const res = await fetch(url, {
+    headers: {
+      Accept: 'application/json, text/plain;q=0.9, text/html;q=0.8',
+      'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36',
+      Referer: 'https://cable.ayra.ch/',
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache',
+    },
+    signal: controller.signal,
+  });
+
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status} from internet key source (${url})`);
+  }
+
+  const contentType = String(res.headers.get('content-type') || '').toLowerCase();
+  const bodyText = await res.text();
+  if (!bodyText.trim()) {
+    throw new Error(`Empty response from internet key source (${url})`);
+  }
+
+  if (contentType.includes('json')) {
+    try {
+      const json = JSON.parse(bodyText);
+      return extractInternetReferenceFromJson(json, fallbackExpiry || '');
+    } catch {
+      // Some proxies mislabel payloads; fall through to text extraction.
+    }
+  }
+
+  // Try JSON parse first even for text to tolerate misconfigured content-type.
+  try {
+    const json = JSON.parse(bodyText);
+    return extractInternetReferenceFromJson(json, fallbackExpiry || '');
+  } catch {
+    return extractInternetReferenceFromText(bodyText, fallbackExpiry || '');
+  }
 }
 
 async function fetchInternetKeyReference(cfg) {
@@ -167,24 +379,30 @@ async function fetchInternetKeyReference(cfg) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 10000);
   try {
-    const res = await fetch(cfg.internetKeySourceUrl, {
-      headers: { Accept: 'text/html, text/plain;q=0.9' },
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status} from internet key source`);
+    let extracted = null;
+    const attempts = [cfg.internetKeySourceUrl, INTERNET_KEY_SOURCE_URL_BACKUP];
+    let lastError = null;
+
+    for (const sourceUrl of attempts) {
+      try {
+        extracted = await fetchInternetReferenceFromUrl(sourceUrl, cfg.internetExpiry || '', controller);
+        if (extracted.internetKey) break;
+      } catch (error) {
+        lastError = error;
+      }
     }
-    const html = await res.text();
-    const extracted = extractInternetKeyFromHtml(html);
-    if (!extracted.key) {
-      throw new Error('Unable to parse internet key from source');
+
+    if (!extracted || !extracted.internetKey) {
+      const reason = lastError ? (lastError.message || String(lastError)) : 'Unable to parse internet key from source';
+      throw new Error(reason);
     }
-    const expiry = extractExpiryNearKey(html, extracted.index) || cfg.internetExpiry || '';
+
     internetKeyCache = {
       fetchedAt: now,
-      internetKey: extracted.key,
-      internetExpiry: expiry,
+      internetKey: extracted.internetKey,
+      internetExpiry: extracted.internetExpiry || '',
       fetchError: '',
+      keyRecords: extracted.keyRecords || [],
     };
     return { ...internetKeyCache };
   } catch (error) {
@@ -194,6 +412,7 @@ async function fetchInternetKeyReference(cfg) {
       internetKey: internetKeyCache.internetKey || '',
       internetExpiry: internetKeyCache.internetExpiry || cfg.internetExpiry || '',
       fetchError: hasCachedKey ? '' : (error.message || 'Failed to fetch internet key'),
+      keyRecords: Array.isArray(internetKeyCache.keyRecords) ? internetKeyCache.keyRecords : [],
     };
     internetKeyCache = fallback;
     return { ...fallback };
@@ -536,69 +755,90 @@ async function parseArmLogFileTranscodeType(logPath) {
 }
 
 function computeKeyStatus(localKey, internetKey, internetExpiry, errors) {
+  const publicDaysDelta = daysDeltaFromToday(internetExpiry);
+  const publicExpired = Number.isFinite(publicDaysDelta) ? publicDaysDelta < 0 : false;
+
+  const buildLocalTiming = () => {
+    if (!internetKey || !localKey) return 'local key timing unavailable';
+    if (localKey === internetKey) {
+      if (!Number.isFinite(publicDaysDelta)) return 'local key timing unavailable';
+      return publicDaysDelta < 0
+        ? `local key expired ${formatDaysPast(publicDaysDelta)}`
+        : `local key expires in ${formatDaysFuture(publicDaysDelta)}`;
+    }
+    if (!Number.isFinite(publicDaysDelta)) return 'local key timing unavailable';
+    return publicDaysDelta < 0
+      ? `local key expired ${formatDaysPast(publicDaysDelta)}`
+      : `local key expires in ${formatDaysFuture(publicDaysDelta)}`;
+  };
+
   if (errors && errors.length) {
     return {
       state: 'error',
+      severity: 'red',
       localMatch: false,
       expiresOn: internetExpiry || null,
       message: errors.join('; '),
       localKey,
       internetKey,
+      publicDaysDelta,
+      localTimingText: buildLocalTiming(),
     };
   }
-  const now = Date.now();
-  const expiryTs = internetExpiry ? Date.parse(`${internetExpiry}T23:59:59Z`) : NaN;
-  const hasExpiry = Number.isFinite(expiryTs);
-  const dateValid = hasExpiry ? now <= expiryTs : null;
 
-  if (!localKey) {
-    if (dateValid === false) {
-      return {
-        state: 'expired',
-        localMatch: false,
-        expiresOn: internetExpiry || null,
-        message: 'Beta key expired',
-        localKey,
-        internetKey,
-      };
-    }
-    if (dateValid === true) {
-      return {
-        state: 'valid',
-        localMatch: false,
-        expiresOn: internetExpiry || null,
-        message: 'Beta key date valid',
-        localKey,
-        internetKey,
-      };
-    }
-    return {
-      state: 'missing',
-      localMatch: false,
-      expiresOn: internetExpiry || null,
-      message: 'Local key missing',
-      localKey,
-      internetKey,
-    };
-  }
-  if (!internetKey) {
+  if (!internetKey || !Number.isFinite(publicDaysDelta)) {
     return {
       state: 'unknown',
+      severity: 'yellow',
       localMatch: false,
       expiresOn: internetExpiry || null,
       message: 'No internet reference key configured',
       localKey,
       internetKey,
+      publicDaysDelta,
+      localTimingText: buildLocalTiming(),
     };
   }
+
+  if (publicExpired) {
+    return {
+      state: 'expired',
+      severity: 'red',
+      localMatch: Boolean(localKey) && localKey === internetKey,
+      expiresOn: internetExpiry || null,
+      message: `MakeMKV Key Expired - No new key posted as of ${formatDaysPast(publicDaysDelta)}`,
+      localKey,
+      internetKey,
+      publicDaysDelta,
+      localTimingText: buildLocalTiming(),
+    };
+  }
+
   const localMatch = localKey === internetKey;
+  if (localMatch) {
+    return {
+      state: 'valid',
+      severity: 'green',
+      localMatch: true,
+      expiresOn: internetExpiry || null,
+      message: `Ready to Rip - Public key expires in ${formatDaysFuture(publicDaysDelta)}`,
+      localKey,
+      internetKey,
+      publicDaysDelta,
+      localTimingText: `local key expires in ${formatDaysFuture(publicDaysDelta)}`,
+    };
+  }
+
   return {
-    state: localMatch ? 'valid' : 'expired',
-    localMatch,
+    state: 'mismatch',
+    severity: 'yellow',
+    localMatch: false,
     expiresOn: internetExpiry || null,
-    message: localMatch ? 'Ready' : 'Outdated key',
+    message: `MakeMKV Key Mismatch - Public key expires in ${formatDaysFuture(publicDaysDelta)} (${buildLocalTiming()})`,
     localKey,
     internetKey,
+    publicDaysDelta,
+    localTimingText: buildLocalTiming(),
   };
 }
 
@@ -1030,13 +1270,17 @@ async function buildHealth(cfg) {
       media: { posterUrl: '', title: '', year: '' },
       keyStatus: {
         state: 'error',
+        severity: 'red',
         localMatch: false,
         expiresOn: cfg.internetExpiry || null,
         message: `Missing config: ${cfgMissing.join(', ')}`,
+        publicDaysDelta: null,
+        localTimingText: 'local key timing unavailable',
       },
       readyToRip: false,
       issues: [`Missing config: ${cfgMissing.join(', ')}`],
       drive: { detected: false, count: 0, devices: [] },
+      history: getRipHistory(),
     };
   }
 
@@ -1055,6 +1299,7 @@ async function buildHealth(cfg) {
       title: formatDisplayTitle(omdbTitle, fallbackYear),
       year: fallbackYear,
     };
+    updateRipHistoryFromTelemetry({ rip, transcode, media });
     const state = computeOverallState({ rip, transcode, keyStatus, issues });
     const driveDetected = drives.length > 0;
     const readyToRip = state === 'idle' && keyStatus.state === 'valid' && driveDetected;
@@ -1067,9 +1312,12 @@ async function buildHealth(cfg) {
       media,
       keyStatus: {
         state: keyStatus.state,
+        severity: keyStatus.severity,
         localMatch: keyStatus.localMatch,
         expiresOn: keyStatus.expiresOn,
         message: keyStatus.message,
+        publicDaysDelta: keyStatus.publicDaysDelta,
+        localTimingText: keyStatus.localTimingText,
       },
       readyToRip,
       issues,
@@ -1078,6 +1326,7 @@ async function buildHealth(cfg) {
         count: drives.length,
         devices: drives,
       },
+      history: getRipHistory(),
       debug: {
         latestJobLogPath: latestJobLogPath || '',
         latestProgressLogPath: latestProgressLogPath || '',
@@ -1092,32 +1341,36 @@ async function buildHealth(cfg) {
       media: { posterUrl: '', title: '', year: '' },
       keyStatus: {
         state: 'error',
+        severity: 'red',
         localMatch: false,
         expiresOn: cfg.internetExpiry || null,
         message: error.message || 'Failed to gather telemetry',
+        publicDaysDelta: null,
+        localTimingText: 'local key timing unavailable',
       },
       readyToRip: false,
       issues: [error.message || 'Failed to gather telemetry'],
       drive: { detected: false, count: 0, devices: [] },
+      history: getRipHistory(),
     };
   }
 }
 
 module.exports = {
   metadata: {
-    name: 'MakeMKV Rip Monitor',
+    name: 'ARM Watch',
     description: 'Live rip/transcode monitor and license health for ARM MakeMKV host',
   },
 
   init({ app }) {
-    app.get('/api/makemkv-key/health', async (req, res) => {
+    app.get('/api/arm-watch/health', async (req, res) => {
       const cfg = getConfig();
       const health = await buildHealth(cfg);
       res.json(health);
     });
-    console.log('[MakeMKV App] Route /api/makemkv-key/health registered.');
+    console.log('[ARM Watch] Route /api/arm-watch/health registered.');
 
-    app.get('/api/makemkv-key/key-status', async (req, res) => {
+    app.get('/api/arm-watch/key-status', async (req, res) => {
       const cfg = getConfig();
       const missing = validateConfig(cfg);
       if (missing.length > 0) {
@@ -1140,9 +1393,12 @@ module.exports = {
         const status = computeKeyStatus(localKey, keyRef.internetKey, keyRef.internetExpiry, keyErrors);
         res.json({
           state: status.state,
+          severity: status.severity,
           localMatch: status.localMatch,
           expiresOn: status.expiresOn,
           message: status.message,
+          publicDaysDelta: status.publicDaysDelta,
+          localTimingText: status.localTimingText,
           localKey: status.localKey,
           internetKey: status.internetKey,
           source: cfg.internetKeySourceUrl,
@@ -1154,9 +1410,9 @@ module.exports = {
         });
       }
     });
-    console.log('[MakeMKV App] Route /api/makemkv-key/key-status registered.');
+    console.log('[ARM Watch] Route /api/arm-watch/key-status registered.');
 
-    app.get('/api/makemkv-key/localkey', async (req, res) => {
+    app.get('/api/arm-watch/localkey', async (req, res) => {
       const cfg = getConfig();
       const missing = validateConfig(cfg);
       if (missing.length > 0) {
@@ -1189,9 +1445,9 @@ module.exports = {
         res.status(500).json({ error: 'Failed to fetch local key', details: error.message });
       }
     });
-    console.log('[MakeMKV App] Route /api/makemkv-key/localkey registered.');
+    console.log('[ARM Watch] Route /api/arm-watch/localkey registered.');
 
-    app.post('/api/makemkv-key/update', express.json(), async (req, res) => {
+    app.post('/api/arm-watch/update', express.json(), async (req, res) => {
       const cfg = getConfig();
       const missing = validateConfig(cfg);
       if (missing.length > 0) {
@@ -1222,9 +1478,9 @@ module.exports = {
         res.status(500).json({ error: 'Failed to update local key', details: error.message });
       }
     });
-    console.log('[MakeMKV App] Route /api/makemkv-key/update registered.');
+    console.log('[ARM Watch] Route /api/arm-watch/update registered.');
 
-    app.get('/apps/makemkv-key/status', (req, res) => {
+    app.get('/apps/arm-watch/status', (req, res) => {
       res.json({ status: 'ok', message: 'Rip monitor is running' });
     });
   },

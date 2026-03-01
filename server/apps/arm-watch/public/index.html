@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=800, height=450, user-scalable=no" />
+  <title>ARM Watch</title>
+  <style>
+    :root {
+      --bg: #121317;
+      --panel: #1b1f28;
+      --panel-soft: #222836;
+      --text: #f1f4ff;
+      --sub: #aab3c7;
+      --accent: #3ea4ff;
+      --good: #53d37e;
+      --warn: #ffb347;
+      --bad: #ff6f6f;
+    }
+
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      margin: 0;
+      width: 800px;
+      height: 450px;
+      overflow: hidden;
+      background: radial-gradient(circle at 15% 10%, #1f2a40 0%, var(--bg) 45%);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    .screen {
+      position: absolute;
+      inset: 0;
+      padding: 16px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-height: 0;
+    }
+
+    .top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .title {
+      margin: 0;
+      font-size: 42px;
+      font-weight: 800;
+      color: var(--accent);
+      letter-spacing: 0.4px;
+      line-height: 1;
+    }
+
+    .meta {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--sub);
+      font-size: 22px;
+      white-space: nowrap;
+    }
+
+    .refresh-btn {
+      width: 30px;
+      height: 30px;
+      border-radius: 999px;
+      border: 1px solid #4d5d79;
+      color: #d9e6ff;
+      background: #202a3b;
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      transition: background 0.15s ease, transform 0.15s ease;
+    }
+
+    .refresh-btn:active {
+      transform: scale(0.96);
+    }
+
+    .status-bar {
+      min-height: 58px;
+      border: 2px solid #394258;
+      border-radius: 12px;
+      display: flex;
+      align-items: stretch;
+      overflow: hidden;
+      background: #171c28;
+      flex-shrink: 0;
+    }
+
+    .status-bar.good {
+      border-color: var(--good);
+      box-shadow: inset 0 0 0 1px rgba(83, 211, 126, 0.2);
+    }
+
+    .status-bar.warn {
+      border-color: var(--warn);
+      box-shadow: inset 0 0 0 1px rgba(255, 179, 71, 0.2);
+    }
+
+    .status-bar.bad {
+      border-color: var(--bad);
+      box-shadow: inset 0 0 0 1px rgba(255, 111, 111, 0.2);
+    }
+
+    .status-message {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      font-size: 24px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .status-bar.good .status-message { color: var(--good); }
+    .status-bar.warn .status-message { color: var(--warn); }
+    .status-bar.bad .status-message { color: var(--bad); }
+
+    .update-key-btn {
+      min-width: 170px;
+      border: 0;
+      border-left: 2px solid rgba(255, 255, 255, 0.15);
+      border-radius: 0;
+      background: rgba(255, 179, 71, 0.2);
+      color: #ffd8a3;
+      font-size: 20px;
+      font-weight: 700;
+      cursor: pointer;
+      padding: 0 18px;
+      display: none;
+      height: 100%;
+    }
+
+    .update-key-btn.visible {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .content-zone {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .primary-card {
+      display: grid;
+      grid-template-columns: 146px 1fr;
+      gap: 12px;
+      min-height: 220px;
+      border-radius: 12px;
+      border: 1px solid #2d3443;
+      background: #182131;
+      padding: 10px 12px;
+      flex-shrink: 0;
+    }
+
+    .poster {
+      width: 146px;
+      height: 220px;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 2px solid #3a455d;
+      background: var(--panel-soft);
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      color: var(--sub);
+      font-size: 14px;
+      padding: 10px;
+    }
+
+    .poster.status-good { border-color: var(--good); }
+    .poster.status-warn { border-color: var(--warn); }
+    .poster.status-bad { border-color: var(--bad); }
+
+    .poster img {
+      width: 100%;
+      height: 100%;
+      aspect-ratio: 2 / 3;
+      object-fit: cover;
+      display: none;
+    }
+
+    .poster-status {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      font-size: 16px;
+      font-weight: 800;
+      line-height: 1;
+      color: #111826;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: #5e6a84;
+      z-index: 1;
+    }
+
+    .poster-status.good { background: var(--good); }
+    .poster-status.warn { background: var(--warn); }
+    .poster-status.bad { background: var(--bad); }
+
+    .details {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      min-width: 0;
+    }
+
+    .movie-title {
+      font-size: 28px;
+      font-weight: 800;
+      line-height: 1.1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .subline {
+      font-size: 18px;
+      color: var(--sub);
+    }
+
+    .progress-wrap {
+      margin-top: 3px;
+      background: #0f141f;
+      border-radius: 999px;
+      height: 15px;
+      overflow: hidden;
+      border: 1px solid #31405a;
+    }
+
+    .progress {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #4ea7ff, #7bd8ff);
+      transition: width 0.35s ease;
+    }
+
+    .rows {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px 12px;
+      font-size: 16px;
+      color: #d4def5;
+    }
+
+    .row-item { display: none; }
+
+    .label {
+      color: var(--sub);
+    }
+
+    .history-scroller {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .history-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-height: 100%;
+    }
+
+    .secondary-card {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 86px;
+      border-radius: 12px;
+      border: 1px solid #2a3a53;
+      background: #182131;
+      padding: 8px 10px;
+    }
+
+    .secondary-thumb {
+      width: 50px;
+      height: 74px;
+      border-radius: 8px;
+      border: 1px solid #3a455d;
+      overflow: hidden;
+      background: #222b3b;
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--sub);
+      font-size: 11px;
+      text-align: center;
+      padding: 4px;
+    }
+
+    .secondary-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: none;
+    }
+
+    .secondary-meta {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .secondary-title {
+      font-size: 26px;
+      font-weight: 800;
+      line-height: 1.1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-transform: uppercase;
+    }
+
+    .secondary-status {
+      font-size: 17px;
+      color: var(--sub);
+    }
+
+    .empty-history {
+      border-radius: 12px;
+      border: 1px dashed #39506d;
+      color: var(--sub);
+      padding: 14px;
+      font-size: 18px;
+      text-align: center;
+      background: rgba(24, 33, 49, 0.45);
+    }
+
+    .issues {
+      margin-top: 8px;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 111, 111, 0.35);
+      background: rgba(255, 111, 111, 0.09);
+      color: #ffb1b1;
+      font-size: 13px;
+      line-height: 1.35;
+      padding: 6px 10px;
+      display: none;
+      max-height: 58px;
+      overflow: auto;
+    }
+
+    .focus-outline {
+      box-shadow: 0 0 0 2px #ffffff;
+    }
+
+    #main-screen.mode-idle .primary-card {
+      display: none;
+    }
+
+    #main-screen.mode-idle .history-scroller {
+      border-radius: 12px;
+      border: 1px solid #2a3a53;
+      background: rgba(24, 33, 49, 0.42);
+      padding: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div id="main-screen" class="screen mode-idle">
+    <div class="top">
+      <h1 class="title">ARM Watch</h1>
+      <div class="meta">
+        <span id="updated-at">Updated: --:--:--</span>
+        <button id="refresh-btn" class="refresh-btn" title="Refresh" aria-label="Refresh">↻</button>
+      </div>
+    </div>
+
+    <div id="status-bar" class="status-bar warn">
+      <div id="status-message" class="status-message">Loading key status...</div>
+      <button id="update-key-btn" class="update-key-btn">Update Key</button>
+    </div>
+
+    <div class="content-zone">
+      <div id="primary-card" class="primary-card">
+        <div id="poster-box" class="poster status-warn">
+          <div id="poster-status" class="poster-status warn">-</div>
+          <img id="poster-img" alt="Movie Poster" />
+          <div id="poster-fallback">No cover art</div>
+        </div>
+
+        <div class="details">
+          <div id="movie-title" class="movie-title">No active media</div>
+          <div id="movie-subline" class="subline">Waiting for telemetry...</div>
+          <div class="progress-wrap">
+            <div id="progress-bar" class="progress"></div>
+          </div>
+          <div class="rows">
+            <div id="row-rip-progress" class="row-item"><span class="label">Rip:</span> <span id="rip-progress"></span></div>
+            <div id="row-rip-eta" class="row-item"><span class="label">Rip ETA:</span> <span id="rip-eta"></span></div>
+            <div id="row-transcode-progress" class="row-item"><span class="label">Transcode:</span> <span id="transcode-progress"></span></div>
+            <div id="row-transcode-eta" class="row-item"><span class="label">Trans ETA:</span> <span id="transcode-eta"></span></div>
+            <div id="row-fps" class="row-item"><span class="label">FPS:</span> <span id="fps"></span></div>
+            <div id="row-codec" class="row-item"><span class="label">Codec:</span> <span id="codec"></span></div>
+            <div id="row-gpu" class="row-item"><span class="label">GPU:</span> <span id="gpu"></span></div>
+          </div>
+          <div id="issues" class="issues"></div>
+        </div>
+      </div>
+
+      <div class="history-scroller">
+        <div id="history-list" class="history-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>

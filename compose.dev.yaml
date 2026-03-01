@@ -1,18 +1,35 @@
 services:
+  arm-sidecar:
+    extends:
+      file: ./compose.base.yaml
+      service: arm-sidecar
+    build:
+      context: ./arm-sidecar
+      dockerfile: Dockerfile
+    image: ghcr.io/${GHCR_OWNER:-jakespocket}/arm-sidecar:${ARM_SIDECAR_IMAGE_TAG:-dev-local}
+    container_name: arm-sidecar-dev
+    environment:
+      ARM_SIDECAR_MODE: ${ARM_SIDECAR_MODE:-mock}
+      ARM_SETTINGS_PATH: ${ARM_SETTINGS_PATH:-/home/me/docker/acquisition/arm/.MakeMKV/settings.conf}
+      ARM_LOGS_DIR: ${ARM_LOGS_DIR:-/home/me/docker/acquisition/arm/logs}
+      ARM_ARM_LOG_PATH: ${ARM_ARM_LOG_PATH:-/home/me/docker/acquisition/arm/logs/arm.log}
+      ARM_TRANSCODE_LOG_PATH: ${ARM_TRANSCODE_LOG_PATH:-/home/me/docker/acquisition/arm/logs/transcode.log}
+      ARM_SSH_HOST: ${ARM_SSH_HOST:-10.0.0.10}
+      ARM_SSH_USER: ${ARM_SSH_USER:-me}
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+      - ${ARM_SSH_KEY_HOST_PATH:-/Volumes/500GB Drive/Users/me/.ssh/makemkv_dev_arm}:/run/secrets/arm_ssh_key:ro
+
   serverthing:
+    extends:
+      file: ./compose.base.yaml
+      service: serverthing
     build:
       context: .
       dockerfile: Dockerfile
-    image: ghcr.io/${GHCR_OWNER:-jakespocket}/serverthing:dev-local
+    image: ghcr.io/${GHCR_OWNER:-jakespocket}/serverthing:${SERVERTHING_IMAGE_TAG:-dev-local}
     container_name: serverthing-dev
-    ports:
-      - "3000:3000"
-    env_file:
-      - ./.env.dockserver
-    environment:
-      NODE_ENV: production
-      MAKEMKV_SSH_KEY_PATH: /run/secrets/makemkv_ssh_key
     volumes:
       - ./data:/app/data
-      - ${MAKEMKV_SSH_KEY_HOST_PATH:-/Volumes/500GB Drive/Users/me/.ssh/makemkv_dev_arm}:/run/secrets/makemkv_ssh_key:ro
-    restart: unless-stopped

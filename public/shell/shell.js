@@ -819,7 +819,7 @@ class ShellRuntime {
       if (val === 'settings_button_up') return this.handleSettingsButtonUp();
 
       if (val === 'preset_1') return this.launchApp('counter');
-      if (val === 'preset_2') return this.launchApp('makemkv-key');
+      if (val === 'preset_2') return this.launchApp('arm-watch');
       if (val === 'preset_4') return this.returnToHomeGrid();
 
       // Handle the physical back button from ServerThing

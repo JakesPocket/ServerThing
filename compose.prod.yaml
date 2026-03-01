@@ -1,19 +1,30 @@
 services:
+  arm-sidecar:
+    extends:
+      file: ./compose.base.yaml
+      service: arm-sidecar
+    container_name: arm-sidecar
+    pull_policy: always
+    environment:
+      ARM_SIDECAR_MODE: live
+      ARM_SETTINGS_PATH: /arm/settings/settings.conf
+      ARM_LOGS_DIR: /arm/logs
+      ARM_ARM_LOG_PATH: /arm/logs/arm.log
+      ARM_TRANSCODE_LOG_PATH: /arm/logs/transcode.log
+    volumes:
+      - arm_sidecar_data:/app/data
+      - ${ARM_HOST_SETTINGS_PATH}:/arm/settings/settings.conf:rw
+      - ${ARM_HOST_LOGS_PATH}:/arm/logs:ro
+
   serverthing:
-    image: ghcr.io/${GHCR_OWNER}/serverthing:${SERVERTHING_IMAGE_TAG}
+    extends:
+      file: ./compose.base.yaml
+      service: serverthing
     container_name: serverthing
     pull_policy: always
-    ports:
-      - "3000:3000"
-    env_file:
-      - ./.env.dockserver
-    environment:
-      NODE_ENV: production
-      MAKEMKV_SSH_KEY_PATH: /run/secrets/makemkv_ssh_key
     volumes:
       - serverthing_data:/app/data
-      - ${MAKEMKV_SSH_KEY_HOST_PATH}:/run/secrets/makemkv_ssh_key:ro
-    restart: unless-stopped
 
 volumes:
+  arm_sidecar_data:
   serverthing_data:
