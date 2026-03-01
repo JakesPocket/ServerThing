@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ghcr.io/${GHCR_OWNER:-your-gh-user}/serverthing:dev-local
+    image: ghcr.io/${GHCR_OWNER:-jakespocket}/serverthing:dev-local
     container_name: serverthing-dev
     ports:
       - "3000:3000"

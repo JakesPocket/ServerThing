@@ -4,11 +4,15 @@ class MakeMkvMonitorApp {
       mainScreen: document.getElementById('main-screen'),
       settingsScreen: document.getElementById('settings-screen'),
       updatedAt: document.getElementById('updated-at'),
+      posterBox: document.getElementById('poster-box'),
       hero: document.getElementById('hero'),
       posterImg: document.getElementById('poster-img'),
       posterFallback: document.getElementById('poster-fallback'),
+      posterStatusIcon: document.getElementById('poster-status-icon'),
       movieTitle: document.getElementById('movie-title'),
       movieSubline: document.getElementById('movie-subline'),
+      keyCompare: document.getElementById('key-compare'),
+      keyExpiry: document.getElementById('key-expiry'),
       progressBar: document.getElementById('progress-bar'),
       rowRipProgress: document.getElementById('row-rip-progress'),
       ripProgress: document.getElementById('rip-progress'),
@@ -28,6 +32,10 @@ class MakeMkvMonitorApp {
       driveChip: document.getElementById('drive-chip'),
       readyChip: document.getElementById('ready-chip'),
       issues: document.getElementById('issues'),
+      historyCard: document.getElementById('history-card'),
+      historyPosterImg: document.getElementById('history-poster-img'),
+      historyPosterFallback: document.getElementById('history-poster-fallback'),
+      historyTitle: document.getElementById('history-title'),
       applyKeyBtn: document.getElementById('apply-key-btn'),
       refreshBtn: document.getElementById('refresh-btn'),
       settingsBtn: document.getElementById('settings-btn'),
@@ -41,6 +49,7 @@ class MakeMkvMonitorApp {
     this.pollTimer = null;
     this.pollAbort = null;
     this.lastGoodData = null;
+    this.lastCompletedMedia = { title: '', posterUrl: '' };
 
     this.init();
   }
@@ -215,6 +224,103 @@ class MakeMkvMonitorApp {
     }
   }
 
+  getKeyVisualStatus(data) {
+    const keyState = data.keyStatus?.state || 'unknown';
+    const statusMessage = String(data.keyStatus?.message || '').toLowerCase();
+    const isDateExpired = keyState === 'expired' && statusMessage.includes('expired');
+
+    if (keyState === 'valid') {
+      return { tone: 'good', symbol: '✓' };
+    }
+    if (keyState === 'error' || isDateExpired) {
+      return { tone: 'bad', symbol: 'X' };
+    }
+    return { tone: 'warn', symbol: '-' };
+  }
+
+  renderPosterStatusLight(data) {
+    const visual = this.getKeyVisualStatus(data);
+
+    this.elements.posterBox.className = 'poster';
+    if (visual.tone === 'good') {
+      this.elements.posterBox.classList.add('status-good');
+    } else if (visual.tone === 'bad') {
+      this.elements.posterBox.classList.add('status-bad');
+    } else {
+      this.elements.posterBox.classList.add('status-warn');
+    }
+
+    this.elements.posterStatusIcon.className = `poster-status-icon ${visual.tone}`;
+    this.elements.posterStatusIcon.textContent = visual.symbol;
+  }
+
+  renderKeyMonitor(data) {
+    const state = data.keyStatus?.state || 'unknown';
+    const localMatch = data.keyStatus?.localMatch;
+
+    let compareText = 'Local/public beta comparison unavailable';
+    const statusMessage = String(data.keyStatus?.message || '').toLowerCase();
+    const isDateExpired = state === 'expired' && statusMessage.includes('expired');
+
+    if (state === 'valid' && localMatch) {
+      compareText = 'Local key matches public beta key';
+    } else if (isDateExpired) {
+      compareText = 'Public beta key is expired';
+    } else if (state === 'expired') {
+      compareText = 'Local key does not match current public beta key';
+    } else if (state === 'missing') {
+      compareText = 'Local key missing in settings.conf';
+    } else if (state === 'error') {
+      compareText = data.keyStatus?.message || 'Beta key monitor unavailable';
+    }
+
+    const expiresOn = String(data.keyStatus?.expiresOn || '').trim();
+    const expiryText = expiresOn ? `Public beta expiry: ${expiresOn}` : 'Public beta expiry: unknown';
+
+    this.elements.keyCompare.textContent = compareText;
+    this.elements.keyExpiry.textContent = expiryText;
+  }
+
+  isActiveMode(data) {
+    return data.state === 'ripping'
+      || data.state === 'transcoding'
+      || Boolean(data.rip?.active)
+      || Boolean(data.transcode?.active);
+  }
+
+  renderLayoutMode(data) {
+    const active = this.isActiveMode(data);
+    this.elements.mainScreen.classList.toggle('mode-active', active);
+    this.elements.mainScreen.classList.toggle('mode-idle', !active);
+  }
+
+  renderRecentHistory(data) {
+    const candidateTitle = String(data.rip?.title || data.media?.title || data.rip?.discLabel || '').trim();
+    const candidatePoster = String(data.media?.posterUrl || '').trim();
+    const ignoreTitle = !candidateTitle || /^no active media$/i.test(candidateTitle);
+
+    if (!ignoreTitle) {
+      this.lastCompletedMedia.title = candidateTitle;
+      if (candidatePoster) this.lastCompletedMedia.posterUrl = candidatePoster;
+    }
+
+    const historyTitle = this.lastCompletedMedia.title
+      ? this.lastCompletedMedia.title.toUpperCase()
+      : 'No completed rip yet';
+    this.elements.historyTitle.textContent = historyTitle;
+
+    if (this.lastCompletedMedia.posterUrl) {
+      this.elements.historyPosterImg.src = this.lastCompletedMedia.posterUrl;
+      this.elements.historyPosterImg.style.display = 'block';
+      this.elements.historyPosterFallback.style.display = 'none';
+    } else {
+      this.elements.historyPosterImg.removeAttribute('src');
+      this.elements.historyPosterImg.style.display = 'none';
+      this.elements.historyPosterFallback.style.display = 'block';
+      this.elements.historyPosterFallback.textContent = 'No art';
+    }
+  }
+
   renderIssues(issues) {
     if (!issues || !issues.length) {
       this.elements.issues.style.display = 'none';
@@ -226,19 +332,27 @@ class MakeMkvMonitorApp {
   }
 
   renderHealth(data, stale = false) {
+    const active = this.isActiveMode(data);
+    this.renderLayoutMode(data);
     const updatedDate = data.updatedAt ? new Date(data.updatedAt) : new Date();
     this.elements.updatedAt.textContent = `${stale ? 'Stale' : 'Updated'}: ${updatedDate.toLocaleTimeString()}`;
     this.renderHero(data);
 
-    const title = data.media?.title || data.rip?.title || data.rip?.discLabel || 'No active media';
-    this.elements.movieTitle.textContent = title;
-
-    if (data.state === 'ripping') {
-      this.elements.movieSubline.textContent = `Ripping from ${data.rip?.discLabel || 'disc source'}`;
-    } else if (data.state === 'transcoding') {
-      this.elements.movieSubline.textContent = 'Transcoding active';
+    if (active) {
+      const title = data.media?.title || data.rip?.title || data.rip?.discLabel || 'No active media';
+      this.elements.movieTitle.textContent = title;
+      if (data.state === 'ripping') {
+        this.elements.movieSubline.textContent = `Ripping from ${data.rip?.discLabel || 'disc source'}`;
+      } else if (data.state === 'transcoding') {
+        this.elements.movieSubline.textContent = 'Transcoding active';
+      } else {
+        this.elements.movieSubline.textContent = data.keyStatus?.message || 'Active';
+      }
+      this.renderPoster(data.media || {});
     } else {
-      this.elements.movieSubline.textContent = data.keyStatus?.message || 'Idle';
+      this.elements.movieTitle.textContent = 'MakeMKV Beta Key Status';
+      this.elements.movieSubline.textContent = 'Local vs public beta key monitor';
+      this.renderPoster({ posterUrl: '', title: 'MakeMKV Beta Key Status' });
     }
 
     const progressPct =
@@ -276,7 +390,9 @@ class MakeMkvMonitorApp {
     this.elements.gpu.textContent = gpuText;
     this.setRowVisible(this.elements.rowGpu, Boolean(gpuText));
 
-    this.renderPoster(data.media || {});
+    this.renderPosterStatusLight(data);
+    this.renderKeyMonitor(data);
+    this.renderRecentHistory(data);
     this.renderChips(data);
     this.renderIssues(data.issues || []);
     this.updateFocus();
