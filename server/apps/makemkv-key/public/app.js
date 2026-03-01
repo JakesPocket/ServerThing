@@ -10,12 +10,20 @@ class MakeMkvMonitorApp {
       movieTitle: document.getElementById('movie-title'),
       movieSubline: document.getElementById('movie-subline'),
       progressBar: document.getElementById('progress-bar'),
+      rowRipProgress: document.getElementById('row-rip-progress'),
       ripProgress: document.getElementById('rip-progress'),
+      rowRipEta: document.getElementById('row-rip-eta'),
       ripEta: document.getElementById('rip-eta'),
+      rowTranscodeProgress: document.getElementById('row-transcode-progress'),
       transcodeProgress: document.getElementById('transcode-progress'),
+      rowTranscodeEta: document.getElementById('row-transcode-eta'),
       transcodeEta: document.getElementById('transcode-eta'),
-      speedFps: document.getElementById('speed-fps'),
-      codecGpu: document.getElementById('codec-gpu'),
+      rowFps: document.getElementById('row-fps'),
+      fps: document.getElementById('fps'),
+      rowCodec: document.getElementById('row-codec'),
+      codec: document.getElementById('codec'),
+      rowGpu: document.getElementById('row-gpu'),
+      gpu: document.getElementById('gpu'),
       keyChip: document.getElementById('key-chip'),
       driveChip: document.getElementById('drive-chip'),
       readyChip: document.getElementById('ready-chip'),
@@ -137,12 +145,17 @@ class MakeMkvMonitorApp {
   }
 
   formatEta(sec) {
-    if (!Number.isFinite(sec) || sec <= 0) return '-';
+    if (!Number.isFinite(sec) || sec <= 0) return '';
     const s = Math.floor(sec % 60);
     const m = Math.floor((sec / 60) % 60);
     const h = Math.floor(sec / 3600);
     if (h > 0) return `${h}h ${m}m`;
     return `${m}m ${s}s`;
+  }
+
+  setRowVisible(rowEl, visible) {
+    if (!rowEl) return;
+    rowEl.style.display = visible ? 'block' : 'none';
   }
 
   renderChips(data) {
@@ -234,18 +247,34 @@ class MakeMkvMonitorApp {
       0;
     this.elements.progressBar.style.width = `${Math.max(0, Math.min(100, progressPct))}%`;
 
-    this.elements.ripProgress.textContent = Number.isFinite(data.rip?.progressPct) ? `${data.rip.progressPct.toFixed(1)}%` : '-';
-    this.elements.ripEta.textContent = this.formatEta(data.rip?.etaSec);
-    this.elements.transcodeProgress.textContent = Number.isFinite(data.transcode?.progressPct) ? `${data.transcode.progressPct.toFixed(1)}%` : '-';
-    this.elements.transcodeEta.textContent = this.formatEta(data.transcode?.etaSec);
+    const ripProgressText = Number.isFinite(data.rip?.progressPct) ? `${data.rip.progressPct.toFixed(1)}%` : '';
+    this.elements.ripProgress.textContent = ripProgressText;
+    this.setRowVisible(this.elements.rowRipProgress, Boolean(ripProgressText));
 
-    const speed = Number.isFinite(data.transcode?.speedX) ? `${data.transcode.speedX.toFixed(2)}x` : '-';
-    const fps = Number.isFinite(data.transcode?.fps) ? `${data.transcode.fps.toFixed(1)} fps` : '-';
-    this.elements.speedFps.textContent = `${speed} / ${fps}`;
+    const ripEtaText = this.formatEta(data.rip?.etaSec);
+    this.elements.ripEta.textContent = ripEtaText;
+    this.setRowVisible(this.elements.rowRipEta, Boolean(ripEtaText));
 
-    const codec = data.transcode?.codec || '-';
-    const gpu = data.transcode?.gpuDetail || data.transcode?.gpuMode || 'unknown';
-    this.elements.codecGpu.textContent = `${codec} / ${gpu}`;
+    const transcodeProgressText = Number.isFinite(data.transcode?.progressPct) ? `${data.transcode.progressPct.toFixed(1)}%` : '';
+    this.elements.transcodeProgress.textContent = transcodeProgressText;
+    this.setRowVisible(this.elements.rowTranscodeProgress, Boolean(transcodeProgressText));
+
+    const transcodeEtaText = this.formatEta(data.transcode?.etaSec);
+    this.elements.transcodeEta.textContent = transcodeEtaText;
+    this.setRowVisible(this.elements.rowTranscodeEta, Boolean(transcodeEtaText));
+
+    const fpsText = Number.isFinite(data.transcode?.fps) ? `${data.transcode.fps.toFixed(1)} fps` : '';
+    this.elements.fps.textContent = fpsText;
+    this.setRowVisible(this.elements.rowFps, Boolean(fpsText));
+
+    const codecText = (data.transcode?.codec || '').trim();
+    this.elements.codec.textContent = codecText;
+    this.setRowVisible(this.elements.rowCodec, Boolean(codecText));
+
+    const gpuValue = (data.transcode?.gpuDetail || '').trim().toLowerCase();
+    const gpuText = gpuValue && gpuValue !== 'unknown' ? gpuValue : '';
+    this.elements.gpu.textContent = gpuText;
+    this.setRowVisible(this.elements.rowGpu, Boolean(gpuText));
 
     this.renderPoster(data.media || {});
     this.renderChips(data);
@@ -283,10 +312,11 @@ class MakeMkvMonitorApp {
 
   async fetchAndRenderHealth(manual = false) {
     if (this.pollAbort) this.pollAbort.abort();
-    this.pollAbort = new AbortController();
+    const controller = new AbortController();
+    this.pollAbort = controller;
 
     try {
-      const response = await fetch('/api/makemkv-key/health', { signal: this.pollAbort.signal });
+      const response = await fetch('/api/makemkv-key/health', { signal: controller.signal });
       const data = await response.json();
       if (!response.ok) {
         throw new Error(data.error || data.message || `HTTP ${response.status}`);
@@ -297,6 +327,14 @@ class MakeMkvMonitorApp {
       this.pollMs = 2000;
       this.renderHealth(data, false);
     } catch (error) {
+      const msg = (error && error.message) ? String(error.message) : '';
+      const isAbort = Boolean(
+        error?.name === 'AbortError' ||
+        /aborted/i.test(msg) ||
+        msg === 'signal is aborted without reason'
+      );
+      if (isAbort) return;
+
       this.failCount += 1;
       this.pollMs = this.failCount >= 2 ? 5000 : 2000;
 
@@ -321,7 +359,7 @@ class MakeMkvMonitorApp {
       }
     } finally {
       if (!manual) this.scheduleNextPoll();
-      this.pollAbort = null;
+      if (this.pollAbort === controller) this.pollAbort = null;
     }
   }
 

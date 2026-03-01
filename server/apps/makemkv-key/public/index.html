@@ -88,14 +88,14 @@
 
     .content {
       display: grid;
-      grid-template-columns: 220px 1fr;
+      grid-template-columns: 146px 1fr;
       gap: 12px;
       min-height: 220px;
       max-height: 220px;
     }
 
     .poster {
-      width: 220px;
+      width: 146px;
       height: 220px;
       background: var(--panel-soft);
       border-radius: 12px;
@@ -112,6 +112,7 @@
     .poster img {
       width: 100%;
       height: 100%;
+      aspect-ratio: 2 / 3;
       object-fit: cover;
       display: none;
     }
@@ -159,6 +160,10 @@
       grid-template-columns: 1fr 1fr;
       gap: 6px 14px;
       font-size: 15px;
+    }
+
+    .row-item {
+      display: none;
     }
 
     .label {
@@ -257,12 +262,13 @@
         </div>
 
         <div class="rows">
-          <div><span class="label">Rip:</span> <span id="rip-progress">-</span></div>
-          <div><span class="label">Rip ETA:</span> <span id="rip-eta">-</span></div>
-          <div><span class="label">Transcode:</span> <span id="transcode-progress">-</span></div>
-          <div><span class="label">Trans ETA:</span> <span id="transcode-eta">-</span></div>
-          <div><span class="label">Speed/FPS:</span> <span id="speed-fps">-</span></div>
-          <div><span class="label">Codec/GPU:</span> <span id="codec-gpu">-</span></div>
+          <div id="row-rip-progress" class="row-item"><span class="label">Rip:</span> <span id="rip-progress"></span></div>
+          <div id="row-rip-eta" class="row-item"><span class="label">Rip ETA:</span> <span id="rip-eta"></span></div>
+          <div id="row-transcode-progress" class="row-item"><span class="label">Transcode:</span> <span id="transcode-progress"></span></div>
+          <div id="row-transcode-eta" class="row-item"><span class="label">Trans ETA:</span> <span id="transcode-eta"></span></div>
+          <div id="row-fps" class="row-item"><span class="label">FPS:</span> <span id="fps"></span></div>
+          <div id="row-codec" class="row-item"><span class="label">Codec:</span> <span id="codec"></span></div>
+          <div id="row-gpu" class="row-item"><span class="label">GPU:</span> <span id="gpu"></span></div>
         </div>
 
         <div class="chip-row">

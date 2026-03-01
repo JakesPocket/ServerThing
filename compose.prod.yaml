@@ -1,0 +1,19 @@
+services:
+  serverthing:
+    image: ghcr.io/${GHCR_OWNER}/serverthing:${SERVERTHING_IMAGE_TAG}
+    container_name: serverthing
+    pull_policy: always
+    ports:
+      - "3000:3000"
+    env_file:
+      - ./.env.dockserver
+    environment:
+      NODE_ENV: production
+      MAKEMKV_SSH_KEY_PATH: /run/secrets/makemkv_ssh_key
+    volumes:
+      - serverthing_data:/app/data
+      - ${MAKEMKV_SSH_KEY_HOST_PATH}:/run/secrets/makemkv_ssh_key:ro
+    restart: unless-stopped
+
+volumes:
+  serverthing_data:

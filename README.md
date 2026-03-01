@@ -191,6 +191,14 @@ Apps can be added by:
 
 No server restart required!
 
+## Docker Dev/Prod Workflow
+
+Use separate targets for safety and repeatability:
+- **Mac mini (dev/staging):** run `compose.dev.yaml`
+- **DockServer (production):** run `compose.prod.yaml` with pinned GHCR image tags
+
+Full commands and tagging workflow: [docs/DOCKER_RELEASE_FLOW.md](docs/DOCKER_RELEASE_FLOW.md)
+
 ## Use Cases
 
 - **Car Thing / Superbird UI** - Custom interfaces for embedded devices

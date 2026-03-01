@@ -1,9 +1,49 @@
 const { execFile } = require('child_process');
 const express = require('express');
+const fs = require('fs');
 const path = require('path');
+const readline = require('readline');
 
 const POSTER_TTL_MS = 6 * 60 * 60 * 1000;
 const posterCache = new Map();
+const INTERNET_KEY_SOURCE_URL_DEFAULT = 'https://forum.makemkv.com/forum/viewtopic.php?f=5&t=1053';
+const INTERNET_KEY_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+let internetKeyCache = {
+  fetchedAt: 0,
+  internetKey: '',
+  internetExpiry: '',
+  fetchError: '',
+};
+
+function isReadableFile(filePath) {
+  if (!filePath) return false;
+  try {
+    fs.accessSync(filePath, fs.constants.R_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function resolveSshKeyPath() {
+  const csvFallback = (process.env.MAKEMKV_SSH_KEY_PATHS || '')
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean);
+
+  const candidates = [
+    process.env.MAKEMKV_SSH_KEY_PATH || '',
+    process.env.MAKEMKV_SSH_KEY_PATH_DOCKSERVER || '',
+    process.env.MAKEMKV_SSH_KEY_PATH_MACMINI || '',
+    ...csvFallback,
+  ]
+    .map((v) => v.trim())
+    .filter(Boolean);
+
+  if (candidates.length === 0) return '';
+  const readable = candidates.find((v) => isReadableFile(v));
+  return readable || candidates[0];
+}
 
 function getConfig() {
   const defaultLogsDir = '/home/me/docker/acquisition/arm/logs';
@@ -19,13 +59,13 @@ function getConfig() {
     apiTimeoutMs: Number(process.env.MAKEMKV_API_TIMEOUT_MS || 10000),
     host: process.env.MAKEMKV_HOST || '10.0.0.10',
     user: process.env.MAKEMKV_USER || 'me',
-    sshKeyPath: process.env.MAKEMKV_SSH_KEY_PATH || '',
+    sshKeyPath: resolveSshKeyPath(),
     settingsPath: process.env.MAKEMKV_SETTINGS_PATH || '/home/me/docker/acquisition/arm/.MakeMKV/settings.conf',
     ripLogPath: process.env.MAKEMKV_RIP_LOG_PATH || defaultArmLogPath,
     transcodeLogPath: process.env.MAKEMKV_TRANSCODE_LOG_PATH || '/home/me/docker/acquisition/arm/logs/transcode.log',
     logsDir: process.env.MAKEMKV_LOGS_DIR || path.dirname(process.env.MAKEMKV_RIP_LOG_PATH || defaultArmLogPath),
-    internetKey: process.env.MAKEMKV_INTERNET_KEY || 'T-URt6MHxNy3HmfVojU8pE05WQ6HfgVI8S@HiIeNcWFim9rBgNlOdLFROSATCsWikcKW',
     internetExpiry: process.env.MAKEMKV_INTERNET_EXPIRY || '2026-03-31',
+    internetKeySourceUrl: process.env.MAKEMKV_INTERNET_KEY_SOURCE_URL || INTERNET_KEY_SOURCE_URL_DEFAULT,
     omdbKey: process.env.OMDB_API_KEY || '',
   };
 }
@@ -63,6 +103,13 @@ function parsePercent(text) {
 
 function parseEtaSec(text) {
   if (!text) return null;
+  const hmsCompact = text.match(/\bETA[:=\s]+(\d{1,3})h(\d{1,2})m(\d{1,2})s\b/i);
+  if (hmsCompact) {
+    const h = Number(hmsCompact[1] || 0);
+    const m = Number(hmsCompact[2] || 0);
+    const s = Number(hmsCompact[3] || 0);
+    return h * 3600 + m * 60 + s;
+  }
   const hms = text.match(/\bETA[:=\s]+(?:(\d+):)?(\d{1,2}):(\d{2})\b/i);
   if (hms) {
     const h = Number(hms[1] || 0);
@@ -81,6 +128,184 @@ function parseLocalKey(settingsContent) {
   const unquoted = settingsContent.match(/^\s*app_Key\s*=\s*([^\s#]+)\s*$/m);
   if (unquoted && unquoted[1]) return unquoted[1].trim();
   return '';
+}
+
+function parseIsoDate(input) {
+  const v = String(input || '').trim();
+  if (!v) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+  const ts = Date.parse(v);
+  if (!Number.isFinite(ts)) return '';
+  return new Date(ts).toISOString().slice(0, 10);
+}
+
+function extractInternetKeyFromHtml(html) {
+  const matches = Array.from(String(html || '').matchAll(/T-[A-Za-z0-9@]+/g));
+  if (matches.length === 0) return { key: '', index: -1 };
+  // Prefer longest token to avoid partial matches.
+  const best = matches.sort((a, b) => (b[0].length - a[0].length))[0];
+  return { key: best[0], index: best.index ?? -1 };
+}
+
+function extractExpiryNearKey(html, keyIndex) {
+  const text = String(html || '');
+  const idx = Number.isFinite(keyIndex) && keyIndex >= 0 ? keyIndex : 0;
+  const window = text.slice(Math.max(0, idx - 600), idx + 1200);
+  const iso = window.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
+  if (iso && iso[1]) return iso[1];
+  const long = window.match(/\b([A-Z][a-z]{2,8}\s+\d{1,2},\s*20\d{2})\b/);
+  if (long && long[1]) return parseIsoDate(long[1]);
+  return '';
+}
+
+async function fetchInternetKeyReference(cfg) {
+  const now = Date.now();
+  if (internetKeyCache.internetKey && now - internetKeyCache.fetchedAt < INTERNET_KEY_CACHE_TTL_MS) {
+    return { ...internetKeyCache };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  try {
+    const res = await fetch(cfg.internetKeySourceUrl, {
+      headers: { Accept: 'text/html, text/plain;q=0.9' },
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status} from internet key source`);
+    }
+    const html = await res.text();
+    const extracted = extractInternetKeyFromHtml(html);
+    if (!extracted.key) {
+      throw new Error('Unable to parse internet key from source');
+    }
+    const expiry = extractExpiryNearKey(html, extracted.index) || cfg.internetExpiry || '';
+    internetKeyCache = {
+      fetchedAt: now,
+      internetKey: extracted.key,
+      internetExpiry: expiry,
+      fetchError: '',
+    };
+    return { ...internetKeyCache };
+  } catch (error) {
+    const hasCachedKey = Boolean(internetKeyCache.internetKey);
+    const fallback = {
+      fetchedAt: now,
+      internetKey: internetKeyCache.internetKey || '',
+      internetExpiry: internetKeyCache.internetExpiry || cfg.internetExpiry || '',
+      fetchError: hasCachedKey ? '' : (error.message || 'Failed to fetch internet key'),
+    };
+    internetKeyCache = fallback;
+    return { ...fallback };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function extractTitleMetadata(rawTitle) {
+  const raw = String(rawTitle || '');
+  const yearMatch = raw.match(/\byear\s*:\s*(\d{4})\b/i);
+  const videoTypeMatch = raw.match(/\bvideo_type\s*:\s*([^\s]+)/i);
+  const discTypeMatch = raw.match(/\bdisctype\s*:\s*([^\s]+)/i);
+
+  let title = raw
+    .replace(/\byear\s*:\s*\d{4}\b/ig, ' ')
+    .replace(/\bvideo_type\s*:\s*[^\s]+/ig, ' ')
+    .replace(/\bdisctype\s*:\s*[^\s]+/ig, ' ')
+    .trim();
+
+  // ARM naming often uses "--" to separate title/subtitle and "-" as word separators.
+  title = title
+    .replace(/--+/g, ' : ')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s*:\s*/g, ': ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return {
+    title,
+    year: yearMatch ? yearMatch[1] : '',
+    videoType: videoTypeMatch ? videoTypeMatch[1] : '',
+    discType: discTypeMatch ? discTypeMatch[1] : '',
+  };
+}
+
+function formatDisplayTitle(title, year) {
+  const base = String(title || '').trim();
+  const y = String(year || '').trim();
+  if (!base) return '';
+  if (y && !base.includes(`(${y})`)) return `${base} (${y})`;
+  return base;
+}
+
+function isUnknownLabel(value) {
+  const v = String(value || '').trim();
+  if (!v) return true;
+  // Common optical-drive placeholders that should not be treated as movie titles.
+  if (/^no[\s_-]*label(?:\b|[\s_-].*)$/i.test(v)) return true;
+  if (/^(unknown|untitled|dvdrom|cdrom)$/i.test(v)) return true;
+  return false;
+}
+
+function sanitizeMediaLabel(value) {
+  const v = String(value || '').trim();
+  return isUnknownLabel(v) ? '' : v;
+}
+
+function cleanVerboseArmLabel(value) {
+  let v = String(value || '').trim();
+  if (!v) return '';
+  // Keep only the title part when ARM emits verbose sentence-style labels.
+  const rippingFrom = v.match(/^Ripping\s+from\s+(.+?)(?:\.\s|$)/i);
+  if (rippingFrom && rippingFrom[1]) v = rippingFrom[1].trim();
+  // Drop trailing metadata and edit-link text that ARM may append.
+  v = v
+    .replace(/\bDisc\s*type\s+is\b.*$/i, '')
+    .replace(/\bMain\s*Feature\s*is\b.*$/i, '')
+    .replace(/\bEdit\s+entry\s+here\s*:\b.*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[.,;:\-\s]+$/g, '');
+  return v;
+}
+
+function parseArmTimestampMs(line) {
+  if (!line) return NaN;
+  const m = line.match(/(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/);
+  if (!m) return NaN;
+  const month = Number(m[1]);
+  const day = Number(m[2]);
+  const year = Number(m[3]);
+  const hour = Number(m[4]);
+  const minute = Number(m[5]);
+  const second = Number(m[6]);
+  const ts = new Date(year, month - 1, day, hour, minute, second).getTime();
+  return Number.isFinite(ts) ? ts : NaN;
+}
+
+function parseHandBrakeProgress(text) {
+  if (!text) return null;
+  const lines = String(text).split(/\r?\n/);
+  let latest = null;
+  for (const line of lines) {
+    const m = line.match(/Encoding:\s*task\s*(\d+)\s*of\s*(\d+),\s*([\d.]+)\s*%/i);
+    if (!m) continue;
+    const task = Number(m[1]);
+    const totalTasks = Number(m[2]);
+    const taskPct = Number(m[3]);
+    if (!Number.isFinite(task) || !Number.isFinite(totalTasks) || totalTasks <= 0 || !Number.isFinite(taskPct)) continue;
+    const clampedTaskPct = Math.max(0, Math.min(100, taskPct));
+    const overall = ((Math.max(1, task) - 1) + (clampedTaskPct / 100)) / totalTasks * 100;
+    const fpsCurrent = line.match(/\(\s*([\d.]+)\s*fps/i);
+    const fpsAvg = line.match(/avg\s*([\d.]+)\s*fps/i);
+    const etaSec = parseEtaSec(line);
+    latest = {
+      progressPct: Math.max(0, Math.min(100, overall)),
+      fps: fpsAvg ? Number(fpsAvg[1]) : (fpsCurrent ? Number(fpsCurrent[1]) : null),
+      etaSec,
+    };
+  }
+  return latest;
 }
 
 function parseRipLog(text) {
@@ -115,7 +340,7 @@ function parseRipLog(text) {
   const effectiveActive = (prgvActive !== null) ? prgvActive : active;
   let phase = effectiveActive ? 'ripping' : 'idle';
   let progressPct = (prgvProgressPct !== null) ? prgvProgressPct : parsePercent(text);
-  const etaSec = parseEtaSec(text);
+  let etaSec = parseEtaSec(text);
 
   // ARM wrapper fallback parsing (when PRGV lines are absent).
   // Example:
@@ -123,8 +348,17 @@ function parseRipLog(text) {
   // [ARM] Not CD, Blu-ray, DVD or Data. Bailing out on sr0
   const armEvents = [];
   const lines = text.split(/\r?\n/);
+  let ripStartTs = NaN;
+  let lastTs = NaN;
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
+    const lineTs = parseArmTimestampMs(line);
+    if (Number.isFinite(lineTs)) {
+      lastTs = lineTs;
+      if (/Ripping disc with MakeMKV|Starting MakeMKV rip|Starting Disc identification/i.test(line)) {
+        ripStartTs = lineTs;
+      }
+    }
     const start = line.match(/\[ARM\]\s+Starting ARM for\s+(.+?)\s+on\s+(\S+)/i);
     if (start) armEvents.push({ kind: 'start', media: start[1].trim(), device: start[2].trim(), idx: i });
     const bail = line.match(/\[ARM\]\s+Not CD, Blu-ray, DVD or Data\. Bailing out on\s+(\S+)/i);
@@ -155,10 +389,33 @@ function parseRipLog(text) {
     }
   }
 
+  // Fallback ETA estimate when we have progress but no explicit ETA in logs.
+  if (
+    etaSec === null &&
+    phase === 'ripping' &&
+    Number.isFinite(progressPct) &&
+    progressPct > 0 &&
+    progressPct < 100 &&
+    Number.isFinite(ripStartTs) &&
+    Number.isFinite(lastTs) &&
+    lastTs > ripStartTs
+  ) {
+    const elapsedSec = (lastTs - ripStartTs) / 1000;
+    etaSec = Math.round((elapsedSec * (100 - progressPct)) / progressPct);
+  }
+
+  const rawTitle = cleanVerboseArmLabel(titleMatch ? titleMatch[1].trim() : '');
+  const rawDiscLabel = cleanVerboseArmLabel(discLabelMatch ? discLabelMatch[1].trim() : '');
+  const parsedTitle = extractTitleMetadata(rawTitle);
+  const parsedDisc = extractTitleMetadata(rawDiscLabel);
+  const cleanTitle = sanitizeMediaLabel(parsedTitle.title || rawTitle);
+  const cleanDiscLabel = sanitizeMediaLabel(parsedDisc.title || rawDiscLabel);
+
   return {
     active: prgvProgressPct !== null ? effectiveActive : phase === 'ripping',
-    title: titleMatch ? titleMatch[1].trim() : '',
-    discLabel: discLabelMatch ? discLabelMatch[1].trim() : '',
+    title: cleanTitle,
+    discLabel: cleanDiscLabel,
+    titleYear: parsedTitle.year || parsedDisc.year || '',
     progressPct,
     phase,
     etaSec,
@@ -168,36 +425,114 @@ function parseRipLog(text) {
 
 function parseTranscodeLog(text) {
   const lower = text.toLowerCase();
-  const active = /(ffmpeg|handbrake|transcod|encoding|x26[45]|vaapi|nvenc|qsv)/i.test(text) &&
-    !/(transcode complete|finished encoding|idle)/i.test(text);
-
+  const hbProgress = parseHandBrakeProgress(text);
   const fpsMatch = text.match(/\b(?:fps|frame(?:s)?\/s)\s*[:=]?\s*(\d+(?:\.\d+)?)/i);
-  const speedMatch = text.match(/\bspeed\s*[:=]?\s*(\d+(?:\.\d+)?)x/i);
+  const timeMatch = text.match(/\btime\s*=\s*\d{1,2}:\d{2}:\d{2}(?:\.\d+)?\b/i);
+  const progressPct = (hbProgress && Number.isFinite(hbProgress.progressPct))
+    ? hbProgress.progressPct
+    : parsePercent(text);
+  const fps = (hbProgress && Number.isFinite(hbProgress.fps))
+    ? hbProgress.fps
+    : (fpsMatch ? Number(fpsMatch[1]) : null);
+  const etaSec = (hbProgress && Number.isFinite(hbProgress.etaSec))
+    ? hbProgress.etaSec
+    : parseEtaSec(text);
+  const hasLiveTelemetry = Boolean(fpsMatch || timeMatch || Number.isFinite(progressPct));
+  const hasTranscodeContext = /(ffmpeg|handbrake|transcod|encoding|x26[45]|vaapi|nvenc|qsv)/i.test(text);
+  const completed = /(transcode complete|finished encoding|idle|all done|completed successfully|encode failed|fatal error)/i.test(text);
+  const active = hasTranscodeContext && hasLiveTelemetry && !completed;
+
   const codecMatch =
+    text.match(/(?:\+|\s)encoder:\s*(H\.?26[45]|HEVC|AV1)\b/i) ||
+    text.match(/encavcodecInit:\s*(H\.?26[45]|HEVC|AV1)/i) ||
+    text.match(/"Encoder"\s*:\s*"([^"]+)"/i) ||
     text.match(/\b(libx264|libx265|h264|h265|hevc|av1)\b/i) ||
     text.match(/\bVideo:\s*([a-zA-Z0-9_]+)/i);
 
+  // Preferred signal from ARM/encoder logs:
+  // "initialized encoder" followed by hw/sw encoder token.
+  const initHwMatch = text.match(/initialized encoder[\s\S]{0,240}?\b(nvenc|qsv|quicksync|vaapi|amf|vce)\b/i);
+  const initSwMatch = text.match(/initialized encoder[\s\S]{0,240}?\b(libx264|libx265|x264|x265)\b/i);
+
+  let transcodeType = 'Unknown';
   let gpuMode = 'unknown';
   let gpuDetail = 'unknown';
-  if (/(vaapi|nvenc|qsv|vulkan|amf)/i.test(lower)) {
+
+  if (initHwMatch) {
+    transcodeType = 'Hardware';
     gpuMode = 'gpu';
-    const detail = lower.match(/(vaapi|nvenc|qsv|vulkan|amf)/i);
+    gpuDetail = initHwMatch[1].toLowerCase();
+  } else if (initSwMatch) {
+    transcodeType = 'Software';
+    gpuMode = 'cpu';
+    gpuDetail = 'software';
+  } else if (/(vaapi|nvenc|qsv|vulkan|amf|vce)/i.test(lower)) {
+    transcodeType = 'Hardware';
+    gpuMode = 'gpu';
+    const detail = lower.match(/(vaapi|nvenc|qsv|vulkan|amf|vce)/i);
     gpuDetail = detail ? detail[1].toLowerCase() : 'gpu';
   } else if (/(libx264|libx265|software|cpu)/i.test(lower)) {
+    transcodeType = 'Software';
     gpuMode = 'cpu';
     gpuDetail = 'software';
   }
 
   return {
     active,
-    progressPct: parsePercent(text),
-    fps: fpsMatch ? Number(fpsMatch[1]) : null,
-    speedX: speedMatch ? Number(speedMatch[1]) : null,
+    progressPct,
+    fps,
     codec: codecMatch ? codecMatch[1].toLowerCase() : '',
+    transcodeType,
     gpuMode,
     gpuDetail,
-    etaSec: parseEtaSec(text),
+    etaSec,
   };
+}
+
+function applyTranscodeDetectionLine(state, line) {
+  if (!line) return state;
+  const hwMatch = line.match(/initialized.*(nvenc|qsv|vaapi)/i);
+  if (hwMatch) {
+    return {
+      transcodeType: 'Hardware',
+      gpuMode: 'gpu',
+      gpuDetail: hwMatch[1].toLowerCase(),
+    };
+  }
+  if (state.transcodeType === 'Unknown' && /(?:\b|_)(x264|x265|libx264|libx265)\b/i.test(line)) {
+    return {
+      transcodeType: 'Software',
+      gpuMode: 'cpu',
+      gpuDetail: 'software',
+    };
+  }
+  return state;
+}
+
+// Stream-parse a dynamic ARM job log file path.
+// This is tolerant of files currently being written by ARM: it reads available content
+// and returns best-known detection state at EOF.
+async function parseArmLogFileTranscodeType(logPath) {
+  const initial = { transcodeType: 'Unknown', gpuMode: 'unknown', gpuDetail: 'unknown' };
+  if (!logPath) return initial;
+  try {
+    await fs.promises.access(logPath, fs.constants.R_OK);
+  } catch {
+    return initial;
+  }
+
+  return new Promise((resolve) => {
+    const input = fs.createReadStream(logPath, { encoding: 'utf8' });
+    const rl = readline.createInterface({ input, crlfDelay: Infinity });
+    let state = initial;
+
+    rl.on('line', (line) => {
+      state = applyTranscodeDetectionLine(state, line);
+    });
+    rl.on('close', () => resolve(state));
+    rl.on('error', () => resolve(initial));
+    input.on('error', () => resolve(initial));
+  });
 }
 
 function computeKeyStatus(localKey, internetKey, internetExpiry, errors) {
@@ -433,17 +768,17 @@ function mapArmJobTelemetry(job) {
       phase: !transcodeLike ? 'ripping' : 'idle',
       etaSec,
     },
-    transcode: {
-      active: transcodeLike,
-      progressPct: transcodeLike ? progressPct : null,
-      fps: pickFirstNumber(job, ['fps']),
-      speedX: pickFirstNumber(job, ['speed', 'speedx']),
-      codec: pickFirstString(job, ['codec', 'video_codec']).toLowerCase(),
-      gpuMode: pickFirstString(job, ['gpu_mode']) || 'unknown',
-      gpuDetail: pickFirstString(job, ['gpu_detail']) || 'unknown',
-      etaSec: transcodeLike ? etaSec : null,
-    },
-  };
+      transcode: {
+        active: transcodeLike,
+        progressPct: transcodeLike ? progressPct : null,
+        fps: pickFirstNumber(job, ['fps']),
+        codec: pickFirstString(job, ['codec', 'video_codec']).toLowerCase(),
+        transcodeType: pickFirstString(job, ['transcode_type']) || 'Unknown',
+        gpuMode: pickFirstString(job, ['gpu_mode']) || 'unknown',
+        gpuDetail: pickFirstString(job, ['gpu_detail']) || 'unknown',
+        etaSec: transcodeLike ? etaSec : null,
+      },
+    };
 }
 
 async function getArmJsonTelemetry(cfg) {
@@ -462,7 +797,7 @@ async function getArmJsonTelemetry(cfg) {
       latestJobLogPath: '',
       localKey: '',
       rip: { active: false, title: '', discLabel: '', progressPct: null, phase: 'idle', etaSec: null },
-      transcode: { active: false, progressPct: null, fps: null, speedX: null, codec: '', gpuMode: 'unknown', gpuDetail: 'unknown', etaSec: null },
+      transcode: { active: false, progressPct: null, fps: null, codec: '', transcodeType: 'Unknown', gpuMode: 'unknown', gpuDetail: 'unknown', etaSec: null },
     };
   }
 
@@ -504,14 +839,15 @@ async function updateApiLocalKey(cfg, newKey) {
   return payload;
 }
 
-async function fetchPoster(title, omdbKey) {
+async function fetchPoster(title, omdbKey, year = '') {
   if (!title || !omdbKey) return null;
   const cacheKey = title.toLowerCase();
   const cached = posterCache.get(cacheKey);
   const now = Date.now();
   if (cached && cached.expiresAt > now) return cached.value;
 
-  const url = `https://www.omdbapi.com/?apikey=${encodeURIComponent(omdbKey)}&t=${encodeURIComponent(title)}`;
+  const yearParam = year ? `&y=${encodeURIComponent(year)}` : '';
+  const url = `https://www.omdbapi.com/?apikey=${encodeURIComponent(omdbKey)}&t=${encodeURIComponent(title)}${yearParam}`;
   try {
     const response = await fetch(url);
     if (!response.ok) return null;
@@ -527,6 +863,17 @@ async function fetchPoster(title, omdbKey) {
   } catch {
     return null;
   }
+}
+
+function titleFromLogPath(logPath) {
+  if (!logPath) return '';
+  const base = path.basename(String(logPath));
+  const withoutExt = base.replace(/\.[^.]+$/, '');
+  const normalized = withoutExt
+    .replace(/[_\.]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return extractTitleMetadata(normalized).title;
 }
 
 function runSsh(cfg, remoteCmd) {
@@ -558,7 +905,16 @@ async function readRemoteFile(cfg, path) {
 
 async function detectLatestJobLogPath(cfg) {
   const cmd =
-    `find ${shSingleQuote(cfg.logsDir)} -maxdepth 1 -type f -name '*_[0-9]*.log' ` +
+    `find ${shSingleQuote(cfg.logsDir)} -maxdepth 1 -type f -name '*.log' ! -name 'arm.log' ! -name 'transcode.log' ` +
+    `-printf '%T@ %p\\n' 2>/dev/null | sort -nr | head -n 1 | cut -d' ' -f2-`;
+  const out = await runSsh(cfg, cmd).catch(() => '');
+  return (out || '').trim();
+}
+
+async function detectLatestProgressLogPath(cfg) {
+  const progressDir = `${cfg.logsDir.replace(/\/+$/, '')}/progress`;
+  const cmd =
+    `find ${shSingleQuote(progressDir)} -maxdepth 1 -type f -name '*.log' ` +
     `-printf '%T@ %p\\n' 2>/dev/null | sort -nr | head -n 1 | cut -d' ' -f2-`;
   const out = await runSsh(cfg, cmd).catch(() => '');
   return (out || '').trim();
@@ -566,17 +922,23 @@ async function detectLatestJobLogPath(cfg) {
 
 async function detectDrive(cfg) {
   try {
-    const out = await runSsh(cfg, "ls /dev/sr* /dev/cdrom* 2>/dev/null || true");
-    return out.split('\n').filter(Boolean);
+    const out = await runSsh(
+      cfg,
+      "for d in /dev/sr* /dev/cdrom*; do " +
+        "[ -e \"$d\" ] || continue; " +
+        "readlink -f \"$d\" 2>/dev/null || echo \"$d\"; " +
+      "done | awk '!seen[$0]++'"
+    );
+    return out.split('\n').map((v) => v.trim()).filter(Boolean);
   } catch {
     return [];
   }
 }
 
-async function getTelemetry(cfg) {
+async function getTelemetry(cfg, keyRef) {
   if (useArmJsonApi(cfg)) {
     const telemetry = await getArmJsonTelemetry(cfg);
-    const keyStatus = computeKeyStatus('', cfg.internetKey, cfg.internetExpiry, []);
+    const keyStatus = computeKeyStatus('', keyRef.internetKey, keyRef.internetExpiry, keyRef.fetchError ? [keyRef.fetchError] : []);
     return {
       issues: telemetry.issues || [],
       rip: telemetry.rip,
@@ -584,6 +946,7 @@ async function getTelemetry(cfg) {
       keyStatus,
       drives: telemetry.drives || [],
       latestJobLogPath: telemetry.latestJobLogPath || '',
+      latestProgressLogPath: telemetry.latestProgressLogPath || '',
     };
   }
 
@@ -594,24 +957,27 @@ async function getTelemetry(cfg) {
     const armLogText = typeof telemetry.armLogText === 'string' ? telemetry.armLogText : '';
     const latestJobLogPath = typeof telemetry.latestJobLogPath === 'string' ? telemetry.latestJobLogPath : '';
     const latestJobLogText = typeof telemetry.latestJobLogText === 'string' ? telemetry.latestJobLogText : '';
-    const transText = typeof telemetry.transcodeLogText === 'string' ? telemetry.transcodeLogText : '';
+    const latestProgressLogPath = typeof telemetry.latestProgressLogPath === 'string' ? telemetry.latestProgressLogPath : '';
+    const progressLogText = typeof telemetry.progressLogText === 'string' ? telemetry.progressLogText : '';
 
     if (!settingsText && !telemetry.localKey) issues.push('settings.conf unavailable via ARM API');
     if (!armLogText) issues.push('ARM log unavailable via ARM API');
-    if (!latestJobLogPath) issues.push('No ARM job logs found via ARM API');
-    if (!transText) issues.push('Transcode log unavailable via ARM API');
+    if (!latestJobLogPath && !latestProgressLogPath) issues.push('No ARM job/progress logs found via ARM API');
 
     const drives = Array.isArray(telemetry.drives) ? telemetry.drives : [];
     const localKey = typeof telemetry.localKey === 'string' ? telemetry.localKey : parseLocalKey(settingsText || '');
-    const keyStatus = computeKeyStatus(localKey, cfg.internetKey, cfg.internetExpiry, localKey ? [] : ['settings.conf unavailable']);
+    const keyErrors = [];
+    if (!localKey) keyErrors.push('settings.conf unavailable');
+    if (keyRef.fetchError) keyErrors.push(keyRef.fetchError);
+    const keyStatus = computeKeyStatus(localKey, keyRef.internetKey, keyRef.internetExpiry, keyErrors);
     const rip = (telemetry.rip && typeof telemetry.rip === 'object')
       ? telemetry.rip
-      : parseRipLog([latestJobLogText, armLogText].filter(Boolean).join('\n'));
+      : parseRipLog([latestJobLogText, progressLogText, armLogText].filter(Boolean).join('\n'));
     const transcode = (telemetry.transcode && typeof telemetry.transcode === 'object')
       ? telemetry.transcode
-      : parseTranscodeLog([transText, latestJobLogText].filter(Boolean).join('\n'));
+      : parseTranscodeLog(latestJobLogText || '');
 
-    return { issues, rip, transcode, keyStatus, drives, latestJobLogPath };
+    return { issues, rip, transcode, keyStatus, drives, latestJobLogPath, latestProgressLogPath };
   }
 
   const issues = [];
@@ -627,19 +993,30 @@ async function getTelemetry(cfg) {
     latestJobLogText = await readRemoteFile(cfg, latestJobLogPath);
     if (!latestJobLogText) issues.push(`Unable to read latest job log at ${latestJobLogPath}`);
   } else {
-    issues.push(`No ARM job logs found in ${cfg.logsDir}`);
+    // Progress logs can still provide reliable PRGV/PRGT status even without a title log.
   }
 
-  const transText = await readRemoteFile(cfg, cfg.transcodeLogPath);
-  if (!transText) issues.push(`Unable to read transcode log at ${cfg.transcodeLogPath}`);
+  const latestProgressLogPath = await detectLatestProgressLogPath(cfg);
+  let progressLogText = '';
+  if (latestProgressLogPath) {
+    progressLogText = await readRemoteFile(cfg, latestProgressLogPath);
+    if (!progressLogText) issues.push(`Unable to read latest progress log at ${latestProgressLogPath}`);
+  }
+
+  if (!latestJobLogPath && !latestProgressLogPath) {
+    issues.push(`No ARM job/progress logs found in ${cfg.logsDir}`);
+  }
 
   const drives = await detectDrive(cfg);
   const localKey = parseLocalKey(settingsText || '');
-  const keyStatus = computeKeyStatus(localKey, cfg.internetKey, cfg.internetExpiry, settingsText ? [] : ['settings.conf unavailable']);
-  const rip = parseRipLog([latestJobLogText, armLogText].filter(Boolean).join('\n'));
-  const transcode = parseTranscodeLog([transText, latestJobLogText].filter(Boolean).join('\n'));
+  const keyErrors = [];
+  if (!settingsText) keyErrors.push('settings.conf unavailable');
+  if (keyRef.fetchError) keyErrors.push(keyRef.fetchError);
+  const keyStatus = computeKeyStatus(localKey, keyRef.internetKey, keyRef.internetExpiry, keyErrors);
+  const rip = parseRipLog([latestJobLogText, progressLogText, armLogText].filter(Boolean).join('\n'));
+  const transcode = parseTranscodeLog(latestJobLogText || '');
 
-  return { issues, rip, transcode, keyStatus, drives, latestJobLogPath };
+  return { issues, rip, transcode, keyStatus, drives, latestJobLogPath, latestProgressLogPath };
 }
 
 async function buildHealth(cfg) {
@@ -649,7 +1026,7 @@ async function buildHealth(cfg) {
       state: 'error',
       updatedAt: Date.now(),
       rip: { active: false, title: '', discLabel: '', progressPct: null, phase: 'idle', etaSec: null },
-      transcode: { active: false, progressPct: null, fps: null, speedX: null, codec: '', gpuMode: 'unknown', gpuDetail: 'unknown', etaSec: null },
+      transcode: { active: false, progressPct: null, fps: null, codec: '', transcodeType: 'Unknown', gpuMode: 'unknown', gpuDetail: 'unknown', etaSec: null },
       media: { posterUrl: '', title: '', year: '' },
       keyStatus: {
         state: 'error',
@@ -664,12 +1041,20 @@ async function buildHealth(cfg) {
   }
 
   try {
-    const { issues, rip, transcode, keyStatus, drives, latestJobLogPath } = await getTelemetry(cfg);
+    const keyRef = await fetchInternetKeyReference(cfg);
+    const { issues, rip, transcode, keyStatus, drives, latestJobLogPath, latestProgressLogPath } = await getTelemetry(cfg, keyRef);
     if (rip && rip.arm && rip.arm.event === 'bail') {
       issues.push(rip.arm.message);
     }
-    const title = rip.title || rip.discLabel || '';
-    const media = (await fetchPoster(title, cfg.omdbKey)) || { posterUrl: '', title, year: '' };
+    const rawTitle = rip.title || rip.discLabel || titleFromLogPath(latestJobLogPath) || '';
+    const parsed = extractTitleMetadata(rawTitle);
+    const omdbTitle = parsed.title || rawTitle;
+    const fallbackYear = rip.titleYear || parsed.year || '';
+    const media = (await fetchPoster(omdbTitle, cfg.omdbKey, fallbackYear)) || {
+      posterUrl: '',
+      title: formatDisplayTitle(omdbTitle, fallbackYear),
+      year: fallbackYear,
+    };
     const state = computeOverallState({ rip, transcode, keyStatus, issues });
     const driveDetected = drives.length > 0;
     const readyToRip = state === 'idle' && keyStatus.state === 'valid' && driveDetected;
@@ -695,6 +1080,7 @@ async function buildHealth(cfg) {
       },
       debug: {
         latestJobLogPath: latestJobLogPath || '',
+        latestProgressLogPath: latestProgressLogPath || '',
       },
     };
   } catch (error) {
@@ -702,7 +1088,7 @@ async function buildHealth(cfg) {
       state: 'error',
       updatedAt: Date.now(),
       rip: { active: false, title: '', discLabel: '', progressPct: null, phase: 'idle', etaSec: null },
-      transcode: { active: false, progressPct: null, fps: null, speedX: null, codec: '', gpuMode: 'unknown', gpuDetail: 'unknown', etaSec: null },
+      transcode: { active: false, progressPct: null, fps: null, codec: '', transcodeType: 'Unknown', gpuMode: 'unknown', gpuDetail: 'unknown', etaSec: null },
       media: { posterUrl: '', title: '', year: '' },
       keyStatus: {
         state: 'error',
@@ -742,12 +1128,16 @@ module.exports = {
       }
 
       try {
+        const keyRef = await fetchInternetKeyReference(cfg);
         const localKey = useArmJsonApi(cfg)
           ? ''
           : hasApiMode(cfg)
           ? await getApiLocalKey(cfg)
           : parseLocalKey(await readRemoteFile(cfg, cfg.settingsPath) || '');
-        const status = computeKeyStatus(localKey, cfg.internetKey, cfg.internetExpiry, localKey ? [] : ['settings.conf unavailable']);
+        const keyErrors = [];
+        if (!localKey) keyErrors.push('settings.conf unavailable');
+        if (keyRef.fetchError) keyErrors.push(keyRef.fetchError);
+        const status = computeKeyStatus(localKey, keyRef.internetKey, keyRef.internetExpiry, keyErrors);
         res.json({
           state: status.state,
           localMatch: status.localMatch,
@@ -755,6 +1145,7 @@ module.exports = {
           message: status.message,
           localKey: status.localKey,
           internetKey: status.internetKey,
+          source: cfg.internetKeySourceUrl,
         });
       } catch (error) {
         res.status(500).json({
