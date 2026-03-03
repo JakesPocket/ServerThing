@@ -1,7 +1,7 @@
 {
-  "name": "arm-sidecar",
+  "name": "arm-bridge",
   "version": "1.0.0",
-  "description": "ARM telemetry/key sidecar for ServerThing",
+  "description": "ARM telemetry/key bridge service for ServerThing",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"

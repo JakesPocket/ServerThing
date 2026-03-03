@@ -1,15 +1,15 @@
 services:
-  arm-sidecar:
-    image: ghcr.io/${GHCR_OWNER}/arm-sidecar:${ARM_SIDECAR_IMAGE_TAG}
+  arm-bridge:
+    image: ghcr.io/${GHCR_OWNER}/arm-bridge:${ARM_BRIDGE_IMAGE_TAG:-${ARM_SIDECAR_IMAGE_TAG}}
     environment:
-      ARM_SIDECAR_MODE: ${ARM_SIDECAR_MODE}
-      ARM_SIDECAR_API_KEY: ${ARM_SIDECAR_API_KEY}
+      ARM_BRIDGE_MODE: ${ARM_BRIDGE_MODE:-${ARM_SIDECAR_MODE}}
+      ARM_BRIDGE_API_KEY: ${ARM_BRIDGE_API_KEY:-${ARM_SIDECAR_API_KEY}}
       ARM_SETTINGS_PATH: ${ARM_SETTINGS_PATH:-/arm/settings/settings.conf}
       ARM_LOGS_DIR: ${ARM_LOGS_DIR:-/arm/logs}
       ARM_PROGRESS_LOGS_DIR: ${ARM_PROGRESS_LOGS_DIR:-/arm/logs/progress}
       ARM_ARM_LOG_PATH: ${ARM_ARM_LOG_PATH:-/arm/logs/arm.log}
       ARM_TRANSCODE_LOG_PATH: ${ARM_TRANSCODE_LOG_PATH:-/arm/logs/transcode.log}
-      ARM_SIDECAR_DATA_DIR: /app/data
+      ARM_BRIDGE_DATA_DIR: /app/data
       ARM_SSH_HOST: ${ARM_SSH_HOST:-}
       ARM_SSH_USER: ${ARM_SSH_USER:-}
       ARM_SSH_KEY_PATH: /run/secrets/arm_ssh_key
@@ -30,15 +30,15 @@ services:
       - ./.env.dockserver
     environment:
       NODE_ENV: production
-      ST_USE_ARM_SIDECAR_DEFAULT: "1"
-      ST_ARM_SIDECAR_BASE_URL: http://arm-sidecar:8080
-      MAKEMKV_API_BASE_URL: http://arm-sidecar:8080
+      ST_USE_ARM_BRIDGE_DEFAULT: "1"
+      ST_ARM_BRIDGE_BASE_URL: http://arm-bridge:8080
+      MAKEMKV_API_BASE_URL: http://arm-bridge:8080
       MAKEMKV_API_MODE: serverthing
-      MAKEMKV_API_KEY: ${ARM_SIDECAR_API_KEY}
+      MAKEMKV_API_KEY: ${ARM_BRIDGE_API_KEY:-${ARM_SIDECAR_API_KEY}}
       MAKEMKV_API_TELEMETRY_PATH: /api/serverthing/telemetry
       MAKEMKV_API_LOCALKEY_PATH: /api/serverthing/localkey
       MAKEMKV_API_UPDATEKEY_PATH: /api/serverthing/localkey
     depends_on:
-      arm-sidecar:
+      arm-bridge:
         condition: service_healthy
     restart: unless-stopped

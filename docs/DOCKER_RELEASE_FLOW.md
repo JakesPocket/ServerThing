@@ -1,18 +1,18 @@
 # Docker Dev/Prod Release Flow
 
 Use one topology in both environments:
-- `serverthing` calls `arm-sidecar` over internal Docker network.
-- `arm-sidecar` runs in `mock` mode for dev and `live` mode for prod.
+- `serverthing` calls `arm-bridge` over internal Docker network.
+- `arm-bridge` runs in `mock` mode for dev and `live` mode for prod.
 
 Optional dev parity mode:
-- Set `ARM_SIDECAR_MODE=ssh` in `.env.dev` to make local sidecar read/write DockServer ARM files over SSH.
+- Set `ARM_BRIDGE_MODE=ssh` in `.env.dev` to make local bridge read/write DockServer ARM files over SSH.
 
 ## 1) Local Dev (Mac mini)
 
 ```bash
 cd ServerThing
 cp .env.dev.example .env.dev
-# edit ARM_SIDECAR_API_KEY if desired
+# edit ARM_BRIDGE_API_KEY if desired
 
 docker compose --env-file .env.dev -f compose.dev.yaml up -d --build
 ```
@@ -21,10 +21,10 @@ Quick checks:
 
 ```bash
 docker compose --env-file .env.dev -f compose.dev.yaml ps
-curl -H "X-API-Key: $(grep '^ARM_SIDECAR_API_KEY=' .env.dev | cut -d= -f2-)" http://localhost:8080/healthz
+curl -H "X-API-Key: $(grep '^ARM_BRIDGE_API_KEY=' .env.dev | cut -d= -f2-)" http://localhost:8080/healthz
 ```
 
-If using `ARM_SIDECAR_MODE=ssh`, ensure:
+If using `ARM_BRIDGE_MODE=ssh`, ensure:
 - `ARM_SSH_KEY_HOST_PATH` points to a valid private key on Mac mini.
 - The target host/user/path values in `.env.dev` are correct.
 
@@ -47,13 +47,13 @@ docker buildx build \
   -t "ghcr.io/$GHCR_OWNER/serverthing:latest" \
   --push .
 
-# arm-sidecar image
+# arm-bridge image
 docker buildx build \
   --platform linux/amd64 \
   -f arm-sidecar/Dockerfile \
-  -t "ghcr.io/$GHCR_OWNER/arm-sidecar:$VERSION" \
-  -t "ghcr.io/$GHCR_OWNER/arm-sidecar:$SHA_TAG" \
-  -t "ghcr.io/$GHCR_OWNER/arm-sidecar:latest" \
+  -t "ghcr.io/$GHCR_OWNER/arm-bridge:$VERSION" \
+  -t "ghcr.io/$GHCR_OWNER/arm-bridge:$SHA_TAG" \
+  -t "ghcr.io/$GHCR_OWNER/arm-bridge:latest" \
   --push arm-sidecar
 ```
 
@@ -78,7 +78,7 @@ Change `.env.prod`:
 
 ```env
 SERVERTHING_IMAGE_TAG=v1.0.1
-ARM_SIDECAR_IMAGE_TAG=v1.0.1
+ARM_BRIDGE_IMAGE_TAG=v1.0.1
 ```
 
 Then redeploy:
@@ -94,9 +94,9 @@ Set both tags to known-good versions in `.env.prod`, then run the same `pull` + 
 
 ## Notes
 
-- In prod, `arm-sidecar` reads real ARM data via:
+- In prod, `arm-bridge` reads real ARM data via:
   - `ARM_HOST_SETTINGS_PATH` -> mounted to `/arm/settings/settings.conf`
   - `ARM_HOST_LOGS_PATH` -> mounted to `/arm/logs`
-- In dev, `arm-sidecar` mock state persists in `ServerThing/data/arm-sidecar-state.json`.
-- `serverthing` now uses API mode by default in compose (`http://arm-sidecar:8080`).
+- In dev, `arm-bridge` mock state persists in `ServerThing/data/arm-bridge-state.json`.
+- `serverthing` now uses API mode by default in compose (`http://arm-bridge:8080`).
 - SSH envs remain as fallback only and are no longer required for normal compose operation.

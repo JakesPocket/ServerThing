@@ -1,19 +1,19 @@
 services:
-  arm-sidecar:
+  arm-bridge:
     extends:
       file: ./compose.base.yaml
-      service: arm-sidecar
-    container_name: arm-sidecar
+      service: arm-bridge
+    container_name: arm-bridge
     pull_policy: always
     environment:
-      ARM_SIDECAR_MODE: live
+      ARM_BRIDGE_MODE: live
       ARM_SETTINGS_PATH: /arm/settings/settings.conf
       ARM_LOGS_DIR: /arm/logs
       ARM_PROGRESS_LOGS_DIR: /arm/logs/progress
       ARM_ARM_LOG_PATH: /arm/logs/arm.log
       ARM_TRANSCODE_LOG_PATH: /arm/logs/transcode.log
     volumes:
-      - arm_sidecar_data:/app/data
+      - arm_bridge_data:/app/data
       - ${ARM_HOST_SETTINGS_PATH}:/arm/settings/settings.conf:rw
       - ${ARM_HOST_LOGS_PATH}:/arm/logs:ro
 
@@ -27,5 +27,5 @@ services:
       - serverthing_data:/app/data
 
 volumes:
-  arm_sidecar_data:
+  arm_bridge_data:
   serverthing_data:

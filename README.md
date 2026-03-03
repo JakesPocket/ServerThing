@@ -194,8 +194,8 @@ No server restart required!
 ## Docker Dev/Prod Workflow
 
 Use separate targets for safety and repeatability:
-- **Mac mini (dev/staging):** run `compose.dev.yaml` (`serverthing` + `arm-sidecar` in mock mode)
-- **DockServer (production):** run `compose.prod.yaml` (`serverthing` + `arm-sidecar` in live mode with host mounts)
+- **Mac mini (dev/staging):** run `compose.dev.yaml` (`serverthing` + `arm-bridge` in mock mode)
+- **DockServer (production):** run `compose.prod.yaml` (`serverthing` + `arm-bridge` in live mode with host mounts)
 
 Full commands and tagging workflow: [docs/DOCKER_RELEASE_FLOW.md](docs/DOCKER_RELEASE_FLOW.md)
 

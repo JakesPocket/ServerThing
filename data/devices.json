@@ -41,16 +41,16 @@
   {
     "id": "shell-mm5gpszj-weflfo",
     "connected": false,
-    "lastSeen": 1772389422684,
+    "lastSeen": 1772511256376,
     "inputs": [],
     "clientInfo": {
-      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Safari/605.1.15",
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.4 Safari/605.1.15",
       "browser": "Safari",
       "platform": "macOS",
       "deviceClass": "desktop",
-      "ip": "::ffff:172.67.195.244"
+      "ip": "::ffff:192.168.65.1"
     },
-    "clientType": "simulator-shell",
+    "clientType": "web-shell",
     "protocolVersion": 1,
     "capabilities": {
       "acceptsHardwareKeycodes": false,

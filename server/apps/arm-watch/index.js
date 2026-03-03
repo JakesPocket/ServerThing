@@ -58,12 +58,15 @@ function resolveSshKeyPath() {
 function getConfig() {
   const defaultLogsDir = '/home/me/docker/acquisition/arm/logs';
   const defaultArmLogPath = `${defaultLogsDir}/arm.log`;
-  const sidecarDefaultEnabled = String(process.env.ST_USE_ARM_SIDECAR_DEFAULT || '').toLowerCase() === '1'
-    || String(process.env.ST_USE_ARM_SIDECAR_DEFAULT || '').toLowerCase() === 'true';
-  const sidecarDefaultUrl = process.env.ST_ARM_SIDECAR_BASE_URL || 'http://arm-sidecar:8080';
+  const bridgeDefaultFlag = String(
+    process.env.ST_USE_ARM_BRIDGE_DEFAULT || process.env.ST_USE_ARM_SIDECAR_DEFAULT || ''
+  ).toLowerCase();
+  const bridgeDefaultEnabled = bridgeDefaultFlag === '1' || bridgeDefaultFlag === 'true';
+  const bridgeDefaultUrl =
+    process.env.ST_ARM_BRIDGE_BASE_URL || process.env.ST_ARM_SIDECAR_BASE_URL || 'http://arm-bridge:8080';
   return {
     apiMode: (process.env.MAKEMKV_API_MODE || '').trim().toLowerCase(),
-    apiBaseUrl: process.env.MAKEMKV_API_BASE_URL || (sidecarDefaultEnabled ? sidecarDefaultUrl : ''),
+    apiBaseUrl: process.env.MAKEMKV_API_BASE_URL || (bridgeDefaultEnabled ? bridgeDefaultUrl : ''),
     apiKey: process.env.MAKEMKV_API_KEY || process.env.ARM_API_KEY || '',
     armJsonPath: process.env.MAKEMKV_ARM_JSON_PATH || '/json',
     apiTelemetryPath: process.env.MAKEMKV_API_TELEMETRY_PATH || '/api/serverthing/telemetry',

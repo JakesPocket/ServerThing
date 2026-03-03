@@ -16,21 +16,22 @@ app.use(express.json());
 
 const cfg = {
   port: Number(process.env.PORT || 8080),
-  mode: (process.env.ARM_SIDECAR_MODE || 'mock').trim().toLowerCase(),
-  apiKey: String(process.env.ARM_SIDECAR_API_KEY || '').trim(),
+  mode: (process.env.ARM_BRIDGE_MODE || process.env.ARM_SIDECAR_MODE || 'mock').trim().toLowerCase(),
+  apiKey: String(process.env.ARM_BRIDGE_API_KEY || process.env.ARM_SIDECAR_API_KEY || '').trim(),
   settingsPath: process.env.ARM_SETTINGS_PATH || '/arm/settings/settings.conf',
   logsDir: process.env.ARM_LOGS_DIR || '/arm/logs',
   progressLogsDir: process.env.ARM_PROGRESS_LOGS_DIR || '/arm/logs/progress',
   armLogPath: process.env.ARM_ARM_LOG_PATH || '/arm/logs/arm.log',
   transcodeLogPath: process.env.ARM_TRANSCODE_LOG_PATH || '/arm/logs/transcode.log',
-  dataDir: process.env.ARM_SIDECAR_DATA_DIR || '/app/data',
+  dataDir: process.env.ARM_BRIDGE_DATA_DIR || process.env.ARM_SIDECAR_DATA_DIR || '/app/data',
   sshHost: String(process.env.ARM_SSH_HOST || '').trim(),
   sshUser: String(process.env.ARM_SSH_USER || '').trim(),
   sshKeyPath: String(process.env.ARM_SSH_KEY_PATH || '/run/secrets/arm_ssh_key').trim(),
   sshTimeoutMs: Number(process.env.ARM_SSH_TIMEOUT_MS || 10000),
 };
 
-const STATE_FILE = path.join(cfg.dataDir, 'arm-sidecar-state.json');
+const STATE_FILE = path.join(cfg.dataDir, 'arm-bridge-state.json');
+const LEGACY_STATE_FILE = path.join(cfg.dataDir, 'arm-sidecar-state.json');
 
 function ensureDataDir() {
   if (!fs.existsSync(cfg.dataDir)) {
@@ -40,12 +41,14 @@ function ensureDataDir() {
 
 function loadMockState() {
   ensureDataDir();
-  try {
-    const raw = fs.readFileSync(STATE_FILE, 'utf8');
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object') return parsed;
-  } catch {
-    // use default
+  for (const statePath of [STATE_FILE, LEGACY_STATE_FILE]) {
+    try {
+      const raw = fs.readFileSync(statePath, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') return parsed;
+    } catch {
+      // try next path
+    }
   }
   return {
     localKey: 'T-MOCK-LOCAL-KEY',
@@ -90,7 +93,7 @@ function getApiKeyFromRequest(req) {
 function authMiddleware(req, res, next) {
   if (req.path === '/healthz') return next();
   if (!cfg.apiKey) {
-    return res.status(500).json({ error: 'ARM sidecar misconfigured: ARM_SIDECAR_API_KEY missing' });
+    return res.status(500).json({ error: 'ARM bridge misconfigured: ARM_BRIDGE_API_KEY missing' });
   }
   const token = getApiKeyFromRequest(req);
   if (!token || token !== cfg.apiKey) {
@@ -434,5 +437,5 @@ app.post('/api/serverthing/localkey', async (req, res) => {
 });
 
 app.listen(cfg.port, () => {
-  console.log(`[arm-sidecar] listening on :${cfg.port} (mode=${cfg.mode})`);
+  console.log(`[arm-bridge] listening on :${cfg.port} (mode=${cfg.mode})`);
 });

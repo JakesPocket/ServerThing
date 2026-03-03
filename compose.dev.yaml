@@ -1,15 +1,15 @@
 services:
-  arm-sidecar:
+  arm-bridge:
     extends:
       file: ./compose.base.yaml
-      service: arm-sidecar
+      service: arm-bridge
     build:
       context: ./arm-sidecar
       dockerfile: Dockerfile
-    image: ghcr.io/${GHCR_OWNER:-jakespocket}/arm-sidecar:${ARM_SIDECAR_IMAGE_TAG:-dev-local}
-    container_name: arm-sidecar-dev
+    image: ghcr.io/${GHCR_OWNER:-jakespocket}/arm-bridge:${ARM_BRIDGE_IMAGE_TAG:-${ARM_SIDECAR_IMAGE_TAG:-dev-local}}
+    container_name: arm-bridge-dev
     environment:
-      ARM_SIDECAR_MODE: ${ARM_SIDECAR_MODE:-mock}
+      ARM_BRIDGE_MODE: ${ARM_BRIDGE_MODE:-${ARM_SIDECAR_MODE:-mock}}
       ARM_SETTINGS_PATH: ${ARM_SETTINGS_PATH:-/home/me/docker/acquisition/arm/.MakeMKV/settings.conf}
       ARM_LOGS_DIR: ${ARM_LOGS_DIR:-/home/me/docker/acquisition/arm/logs}
       ARM_PROGRESS_LOGS_DIR: ${ARM_PROGRESS_LOGS_DIR:-/home/me/docker/acquisition/arm/logs/progress}
