@@ -8,7 +8,8 @@ const POSTER_TTL_MS = 6 * 60 * 60 * 1000;
 const posterCache = new Map();
 const INTERNET_KEY_SOURCE_URL_DEFAULT = 'https://cable.ayra.ch/makemkv/api.php?json';
 const INTERNET_KEY_SOURCE_URL_BACKUP = 'https://forum.makemkv.com/forum/viewtopic.php?f=5&t=1053';
-const INTERNET_KEY_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const INTERNET_KEY_CACHE_TTL_MS = 60 * 60 * 1000;
+const INTERNET_KEY_FAILURE_BACKOFF_MS = 60 * 60 * 1000;
 const MAX_HISTORY_ITEMS = 120;
 const HISTORY_FILE_PATH = path.join(__dirname, '..', '..', '..', 'data', 'makemkv-history.json');
 let internetKeyCache = {
@@ -18,11 +19,18 @@ let internetKeyCache = {
   fetchError: '',
   keyRecords: [],
 };
+let internetKeyRefreshPromise = null;
+let internetKeyNextRefreshAt = 0;
 let ripHistoryCache = null;
 let runtimeRipTracker = {
   active: false,
   lastTitle: '',
   lastPosterUrl: '',
+};
+let ripEtaTwaState = {
+  jobKey: '',
+  startTimeMs: NaN,
+  lastProgressDecimal: NaN,
 };
 
 function isReadableFile(filePath) {
@@ -424,6 +432,35 @@ async function fetchInternetKeyReference(cfg) {
   }
 }
 
+function getFastKeyReference(cfg, forceRefresh = false) {
+  const now = Date.now();
+  const hasFresh = Boolean(internetKeyCache.internetKey) &&
+    (now - Number(internetKeyCache.fetchedAt || 0) < INTERNET_KEY_CACHE_TTL_MS);
+
+  if ((!hasFresh || forceRefresh) && (forceRefresh || now >= internetKeyNextRefreshAt) && !internetKeyRefreshPromise) {
+    // Prevent hammering the public key source when it is rate-limiting.
+    internetKeyNextRefreshAt = now + INTERNET_KEY_FAILURE_BACKOFF_MS;
+    internetKeyRefreshPromise = fetchInternetKeyReference(cfg)
+      .then((result) => {
+        if (result && result.internetKey) {
+          internetKeyNextRefreshAt = Date.now() + INTERNET_KEY_CACHE_TTL_MS;
+        }
+      })
+      .catch(() => null)
+      .finally(() => {
+        internetKeyRefreshPromise = null;
+      });
+  }
+
+  return {
+    fetchedAt: Number(internetKeyCache.fetchedAt || 0),
+    internetKey: String(internetKeyCache.internetKey || ''),
+    internetExpiry: String(internetKeyCache.internetExpiry || cfg.internetExpiry || ''),
+    fetchError: String(internetKeyCache.fetchError || ''),
+    keyRecords: Array.isArray(internetKeyCache.keyRecords) ? internetKeyCache.keyRecords : [],
+  };
+}
+
 function extractTitleMetadata(rawTitle) {
   const raw = String(rawTitle || '');
   const yearMatch = raw.match(/\byear\s*:\s*(\d{4})\b/i);
@@ -544,17 +581,21 @@ function parseRipLog(text) {
     text.match(/DRV:\d+,\d+,\d+,\d+,"([^"]+)"/i);
 
   // MakeMKV emits progress lines like:
-  // PRGV:<current>,<total>,<max>
-  // Use the latest sample and prefer total/max for overall progress.
+  // PRGV:<current>,<overall>,<max>
+  // For ARM logs, overall/max is the best total rip progress signal.
   const prgvMatches = Array.from(text.matchAll(/PRGV:(\d+),(\d+),(\d+)/g));
   let prgvProgressPct = null;
+  let prgvProgressDecimal = NaN;
+  let prgvMax = NaN;
   let prgvActive = null;
   if (prgvMatches.length > 0) {
     const last = prgvMatches[prgvMatches.length - 1];
     const total = Number(last[2]);
     const max = Number(last[3]);
     if (Number.isFinite(total) && Number.isFinite(max) && max > 0) {
-      prgvProgressPct = Math.max(0, Math.min(100, (total / max) * 100));
+      prgvProgressDecimal = Math.max(0, Math.min(1, total / max));
+      prgvProgressPct = prgvProgressDecimal * 100;
+      prgvMax = max;
       prgvActive = total < max;
     }
   }
@@ -572,6 +613,7 @@ function parseRipLog(text) {
   const lines = text.split(/\r?\n/);
   let ripStartTs = NaN;
   let lastTs = NaN;
+  let firstPrgvTs = NaN;
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
     const lineTs = parseArmTimestampMs(line);
@@ -580,6 +622,10 @@ function parseRipLog(text) {
       if (/Ripping disc with MakeMKV|Starting MakeMKV rip|Starting Disc identification/i.test(line)) {
         ripStartTs = lineTs;
       }
+    }
+    if (!Number.isFinite(firstPrgvTs) && /PRGV:\d+,\d+,\d+/.test(line)) {
+      if (Number.isFinite(lineTs)) firstPrgvTs = lineTs;
+      else if (Number.isFinite(lastTs)) firstPrgvTs = lastTs;
     }
     const start = line.match(/\[ARM\]\s+Starting ARM for\s+(.+?)\s+on\s+(\S+)/i);
     if (start) armEvents.push({ kind: 'start', media: start[1].trim(), device: start[2].trim(), idx: i });
@@ -611,19 +657,40 @@ function parseRipLog(text) {
     }
   }
 
-  // Fallback ETA estimate when we have progress but no explicit ETA in logs.
-  if (
-    etaSec === null &&
-    phase === 'ripping' &&
-    Number.isFinite(progressPct) &&
-    progressPct > 0 &&
-    progressPct < 100 &&
-    Number.isFinite(ripStartTs) &&
-    Number.isFinite(lastTs) &&
-    lastTs > ripStartTs
-  ) {
-    const elapsedSec = (lastTs - ripStartTs) / 1000;
-    etaSec = Math.round((elapsedSec * (100 - progressPct)) / progressPct);
+  // Time-weighted ETA from elapsed-vs-percent using PRGV overall progress.
+  if (phase === 'ripping' && Number.isFinite(prgvProgressDecimal) && prgvProgressDecimal > 0 && prgvProgressDecimal < 1) {
+    const currentTimeMs = Number.isFinite(lastTs) ? lastTs : Date.now();
+    const baseStartMs = Number.isFinite(firstPrgvTs)
+      ? firstPrgvTs
+      : (Number.isFinite(ripStartTs) ? ripStartTs : currentTimeMs);
+    const etaJobHint = `${(discLabelMatch && discLabelMatch[1]) ? discLabelMatch[1].trim() : ''}|${(titleMatch && titleMatch[1]) ? titleMatch[1].trim() : ''}`;
+    const jobKey = `${prgvMax}|${etaJobHint}`;
+    const resetByProgress = Number.isFinite(ripEtaTwaState.lastProgressDecimal) &&
+      (prgvProgressDecimal + 0.02 < ripEtaTwaState.lastProgressDecimal);
+    const resetByKey = ripEtaTwaState.jobKey !== jobKey;
+    if (resetByKey || resetByProgress || !Number.isFinite(ripEtaTwaState.startTimeMs)) {
+      ripEtaTwaState = {
+        jobKey,
+        startTimeMs: baseStartMs,
+        lastProgressDecimal: prgvProgressDecimal,
+      };
+    } else {
+      ripEtaTwaState.lastProgressDecimal = prgvProgressDecimal;
+    }
+
+    const elapsedSec = Math.max(0, (currentTimeMs - ripEtaTwaState.startTimeMs) / 1000);
+    if (elapsedSec > 0) {
+      const totalDurationSec = elapsedSec / prgvProgressDecimal;
+      let etaSecComputed = Math.max(0, totalDurationSec - elapsedSec);
+      if (prgvProgressDecimal > 0.99) etaSecComputed = Math.max(60, etaSecComputed);
+      etaSec = Math.round(etaSecComputed);
+    }
+  } else if (phase !== 'ripping') {
+    ripEtaTwaState = {
+      jobKey: '',
+      startTimeMs: NaN,
+      lastProgressDecimal: NaN,
+    };
   }
 
   const rawTitle = cleanVerboseArmLabel(titleMatch ? titleMatch[1].trim() : '');
@@ -646,35 +713,41 @@ function parseRipLog(text) {
 }
 
 function parseTranscodeLog(text) {
-  const lower = text.toLowerCase();
-  const hbProgress = parseHandBrakeProgress(text);
-  const fpsMatch = text.match(/\b(?:fps|frame(?:s)?\/s)\s*[:=]?\s*(\d+(?:\.\d+)?)/i);
-  const timeMatch = text.match(/\btime\s*=\s*\d{1,2}:\d{2}:\d{2}(?:\.\d+)?\b/i);
+  const body = String(text || '');
+  const lower = body.toLowerCase();
+  const hbProgress = parseHandBrakeProgress(body);
+  const fpsMatch = body.match(/\b(?:fps|frame(?:s)?\/s)\s*[:=]?\s*(\d+(?:\.\d+)?)/i);
+  const timeMatch = body.match(/\btime\s*=\s*\d{1,2}:\d{2}:\d{2}(?:\.\d+)?\b/i);
   const progressPct = (hbProgress && Number.isFinite(hbProgress.progressPct))
     ? hbProgress.progressPct
-    : parsePercent(text);
+    : parsePercent(body);
   const fps = (hbProgress && Number.isFinite(hbProgress.fps))
     ? hbProgress.fps
     : (fpsMatch ? Number(fpsMatch[1]) : null);
   const etaSec = (hbProgress && Number.isFinite(hbProgress.etaSec))
     ? hbProgress.etaSec
-    : parseEtaSec(text);
+    : parseEtaSec(body);
   const hasLiveTelemetry = Boolean(fpsMatch || timeMatch || Number.isFinite(progressPct));
-  const hasTranscodeContext = /(ffmpeg|handbrake|transcod|encoding|x26[45]|vaapi|nvenc|qsv)/i.test(text);
-  const completed = /(transcode complete|finished encoding|idle|all done|completed successfully|encode failed|fatal error)/i.test(text);
-  const active = hasTranscodeContext && hasLiveTelemetry && !completed;
+  const hasTranscodeContext = /(ffmpeg|handbrake|transcod|encoding|x26[45]|vaapi|nvenc|qsv)/i.test(body);
+  const completed = /(transcode complete|finished encoding|idle|all done|completed successfully|handbrake processing complete)/i.test(body);
+  const errorLine =
+    body.match(/unknown option\s*\((--[^)]+)\)/i) ||
+    body.match(/unrecognized option\s*['"]?(--\S+)/i) ||
+    body.match(/\b(?:encode failed|fatal error|handbrake\s+has\s+exited|error:\s*.+)\b/i);
+  const failed = Boolean(errorLine);
+  const active = hasTranscodeContext && hasLiveTelemetry && !completed && !failed;
 
   const codecMatch =
-    text.match(/(?:\+|\s)encoder:\s*(H\.?26[45]|HEVC|AV1)\b/i) ||
-    text.match(/encavcodecInit:\s*(H\.?26[45]|HEVC|AV1)/i) ||
-    text.match(/"Encoder"\s*:\s*"([^"]+)"/i) ||
-    text.match(/\b(libx264|libx265|h264|h265|hevc|av1)\b/i) ||
-    text.match(/\bVideo:\s*([a-zA-Z0-9_]+)/i);
+    body.match(/(?:\+|\s)encoder:\s*(H\.?26[45]|HEVC|AV1)\b/i) ||
+    body.match(/encavcodecInit:\s*(H\.?26[45]|HEVC|AV1)/i) ||
+    body.match(/"Encoder"\s*:\s*"([^"]+)"/i) ||
+    body.match(/\b(libx264|libx265|h264|h265|hevc|av1)\b/i) ||
+    body.match(/\bVideo:\s*([a-zA-Z0-9_]+)/i);
 
   // Preferred signal from ARM/encoder logs:
   // "initialized encoder" followed by hw/sw encoder token.
-  const initHwMatch = text.match(/initialized encoder[\s\S]{0,240}?\b(nvenc|qsv|quicksync|vaapi|amf|vce)\b/i);
-  const initSwMatch = text.match(/initialized encoder[\s\S]{0,240}?\b(libx264|libx265|x264|x265)\b/i);
+  const initHwMatch = body.match(/initialized encoder[\s\S]{0,240}?\b(nvenc|qsv|quicksync|vaapi|amf|vce)\b/i);
+  const initSwMatch = body.match(/initialized encoder[\s\S]{0,240}?\b(libx264|libx265|x264|x265)\b/i);
 
   let transcodeType = 'Unknown';
   let gpuMode = 'unknown';
@@ -701,6 +774,8 @@ function parseTranscodeLog(text) {
 
   return {
     active,
+    failed,
+    error: failed ? String(errorLine[0] || '').trim() : '',
     progressPct,
     fps,
     codec: codecMatch ? codecMatch[1].toLowerCase() : '',
@@ -847,6 +922,7 @@ function computeKeyStatus(localKey, internetKey, internetExpiry, errors) {
 
 function computeOverallState({ rip, transcode, keyStatus, issues }) {
   if (issues.length > 0) return 'error';
+  if (transcode.failed) return 'error';
   if (rip.active) return 'ripping';
   if (transcode.active) return 'transcoding';
   if (keyStatus.state === 'error') return 'degraded';
@@ -996,23 +1072,28 @@ function mapArmJobTelemetry(job) {
   const title = pickFirstString(job, ['title', 'movie', 'movie_name', 'name', 'label', 'disc_title']);
   const progressPct = pickFirstNumber(job, ['progress', 'progress_pct', 'percent', 'percent_complete', 'progressPercent']);
   const etaSec = pickFirstNumber(job, ['eta_sec', 'eta', 'remaining_sec', 'time_remaining']);
+  const stopTime = pickFirstString(job, ['stop_time', 'end_time', 'finished_at']);
   const statusText = [
     pickFirstString(job, ['status', 'stage', 'state']),
     pickFirstString(job, ['activity', 'current_task']),
+    pickFirstString(job, ['errors', 'error', 'message']),
   ].join(' ').toLowerCase();
   const transcodeLike = /(transcod|handbrake|ffmpeg|encoding)/i.test(statusText);
+  const failed = /(failed|fatal|error|unknown option|abandon)/i.test(statusText);
+  const done = Boolean(stopTime) || /(success|done|complete|finished)/i.test(statusText);
+  const transcodeActive = transcodeLike && !failed && !done;
 
   return {
     rip: {
-      active: !transcodeLike,
+      active: !transcodeLike && !done,
       title,
       discLabel: pickFirstString(job, ['label', 'disc_label', 'volume']),
       progressPct,
-      phase: !transcodeLike ? 'ripping' : 'idle',
+      phase: (!transcodeLike && !done) ? 'ripping' : 'idle',
       etaSec,
     },
       transcode: {
-        active: transcodeLike,
+        active: transcodeActive,
         progressPct: transcodeLike ? progressPct : null,
         fps: pickFirstNumber(job, ['fps']),
         codec: pickFirstString(job, ['codec', 'video_codec']).toLowerCase(),
@@ -1020,6 +1101,8 @@ function mapArmJobTelemetry(job) {
         gpuMode: pickFirstString(job, ['gpu_mode']) || 'unknown',
         gpuDetail: pickFirstString(job, ['gpu_detail']) || 'unknown',
         etaSec: transcodeLike ? etaSec : null,
+        failed,
+        error: failed ? (pickFirstString(job, ['errors', 'error', 'message']) || 'Transcode failure reported by ARM') : '',
       },
     };
 }
@@ -1040,7 +1123,7 @@ async function getArmJsonTelemetry(cfg) {
       latestJobLogPath: '',
       localKey: '',
       rip: { active: false, title: '', discLabel: '', progressPct: null, phase: 'idle', etaSec: null },
-      transcode: { active: false, progressPct: null, fps: null, codec: '', transcodeType: 'Unknown', gpuMode: 'unknown', gpuDetail: 'unknown', etaSec: null },
+      transcode: { active: false, progressPct: null, fps: null, codec: '', transcodeType: 'Unknown', gpuMode: 'unknown', gpuDetail: 'unknown', etaSec: null, failed: false, error: '' },
     };
   }
 
@@ -1078,6 +1161,17 @@ async function updateApiLocalKey(cfg, newKey) {
   });
   if (payload && payload.success === false) {
     throw new Error(payload.error || payload.message || 'ARM API rejected key update');
+  }
+  return payload;
+}
+
+async function retryApiTranscode(cfg) {
+  const payload = await apiFetchJson(cfg, '/api/serverthing/transcode/retry', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+  if (payload && payload.success === false) {
+    throw new Error(payload.error || payload.message || 'ARM API rejected transcode retry');
   }
   return payload;
 }
@@ -1181,11 +1275,30 @@ async function detectDrive(cfg) {
 async function getTelemetry(cfg, keyRef) {
   if (useArmJsonApi(cfg)) {
     const telemetry = await getArmJsonTelemetry(cfg);
+    let rip = telemetry.rip;
+    let transcode = telemetry.transcode;
+    const issues = Array.isArray(telemetry.issues) ? telemetry.issues : [];
+
+    if (!telemetry.latestJobLogPath && !telemetry.latestProgressLogPath) {
+      issues.push('No ARM job/progress logs found via ARM API');
+      rip = {
+        ...rip,
+        active: false,
+        phase: 'idle',
+        etaSec: null,
+      };
+      transcode = {
+        ...transcode,
+        active: false,
+        etaSec: null,
+      };
+    }
+
     const keyStatus = computeKeyStatus('', keyRef.internetKey, keyRef.internetExpiry, keyRef.fetchError ? [keyRef.fetchError] : []);
     return {
-      issues: telemetry.issues || [],
-      rip: telemetry.rip,
-      transcode: telemetry.transcode,
+      issues,
+      rip,
+      transcode,
       keyStatus,
       drives: telemetry.drives || [],
       latestJobLogPath: telemetry.latestJobLogPath || '',
@@ -1213,12 +1326,29 @@ async function getTelemetry(cfg, keyRef) {
     if (!localKey) keyErrors.push('settings.conf unavailable');
     if (keyRef.fetchError) keyErrors.push(keyRef.fetchError);
     const keyStatus = computeKeyStatus(localKey, keyRef.internetKey, keyRef.internetExpiry, keyErrors);
-    const rip = (telemetry.rip && typeof telemetry.rip === 'object')
+    let rip = (telemetry.rip && typeof telemetry.rip === 'object')
       ? telemetry.rip
       : parseRipLog([latestJobLogText, progressLogText, armLogText].filter(Boolean).join('\n'));
-    const transcode = (telemetry.transcode && typeof telemetry.transcode === 'object')
+    let transcode = (telemetry.transcode && typeof telemetry.transcode === 'object')
       ? telemetry.transcode
       : parseTranscodeLog(latestJobLogText || '');
+
+    // Avoid stale "active" UI when ARM API has no current job/progress logs.
+    if (!latestJobLogPath && !latestProgressLogPath) {
+      rip = {
+        ...rip,
+        active: false,
+        phase: 'idle',
+        progressPct: Number.isFinite(rip.progressPct) ? rip.progressPct : null,
+        etaSec: null,
+      };
+      transcode = {
+        ...transcode,
+        active: false,
+        progressPct: Number.isFinite(transcode.progressPct) ? transcode.progressPct : null,
+        etaSec: null,
+      };
+    }
 
     return { issues, rip, transcode, keyStatus, drives, latestJobLogPath, latestProgressLogPath };
   }
@@ -1262,14 +1392,14 @@ async function getTelemetry(cfg, keyRef) {
   return { issues, rip, transcode, keyStatus, drives, latestJobLogPath, latestProgressLogPath };
 }
 
-async function buildHealth(cfg) {
+async function buildHealth(cfg, options = {}) {
   const cfgMissing = validateConfig(cfg);
   if (cfgMissing.length > 0) {
     return {
       state: 'error',
       updatedAt: Date.now(),
       rip: { active: false, title: '', discLabel: '', progressPct: null, phase: 'idle', etaSec: null },
-      transcode: { active: false, progressPct: null, fps: null, codec: '', transcodeType: 'Unknown', gpuMode: 'unknown', gpuDetail: 'unknown', etaSec: null },
+      transcode: { active: false, progressPct: null, fps: null, codec: '', transcodeType: 'Unknown', gpuMode: 'unknown', gpuDetail: 'unknown', etaSec: null, failed: false, error: '' },
       media: { posterUrl: '', title: '', year: '' },
       keyStatus: {
         state: 'error',
@@ -1288,10 +1418,14 @@ async function buildHealth(cfg) {
   }
 
   try {
-    const keyRef = await fetchInternetKeyReference(cfg);
+    // Never block health on internet key refresh; return quickly with cached key data.
+    const keyRef = getFastKeyReference(cfg, Boolean(options.forceKeyRefresh));
     const { issues, rip, transcode, keyStatus, drives, latestJobLogPath, latestProgressLogPath } = await getTelemetry(cfg, keyRef);
     if (rip && rip.arm && rip.arm.event === 'bail') {
       issues.push(rip.arm.message);
+    }
+    if (transcode && transcode.failed) {
+      issues.push(`Transcode failed: ${transcode.error || 'HandBrake error detected'}`);
     }
     const rawTitle = rip.title || rip.discLabel || titleFromLogPath(latestJobLogPath) || '';
     const parsed = extractTitleMetadata(rawTitle);
@@ -1340,7 +1474,7 @@ async function buildHealth(cfg) {
       state: 'error',
       updatedAt: Date.now(),
       rip: { active: false, title: '', discLabel: '', progressPct: null, phase: 'idle', etaSec: null },
-      transcode: { active: false, progressPct: null, fps: null, codec: '', transcodeType: 'Unknown', gpuMode: 'unknown', gpuDetail: 'unknown', etaSec: null },
+      transcode: { active: false, progressPct: null, fps: null, codec: '', transcodeType: 'Unknown', gpuMode: 'unknown', gpuDetail: 'unknown', etaSec: null, failed: false, error: '' },
       media: { posterUrl: '', title: '', year: '' },
       keyStatus: {
         state: 'error',
@@ -1368,7 +1502,9 @@ module.exports = {
   init({ app }) {
     app.get('/api/arm-watch/health', async (req, res) => {
       const cfg = getConfig();
-      const health = await buildHealth(cfg);
+      const health = await buildHealth(cfg, {
+        forceKeyRefresh: String(req.query.forceKeyRefresh || '') === '1',
+      });
       res.json(health);
     });
     console.log('[ARM Watch] Route /api/arm-watch/health registered.');
@@ -1482,6 +1618,35 @@ module.exports = {
       }
     });
     console.log('[ARM Watch] Route /api/arm-watch/update registered.');
+
+    app.post('/api/arm-watch/transcode/retry', express.json(), async (req, res) => {
+      const cfg = getConfig();
+      const missing = validateConfig(cfg);
+      if (missing.length > 0) {
+        return res.status(500).json({ error: `Missing config: ${missing.join(', ')}` });
+      }
+
+      if (!hasApiMode(cfg)) {
+        return res.status(400).json({
+          error: 'Retry requires MAKEMKV_API_BASE_URL (arm-bridge/sidecar) to be configured',
+        });
+      }
+
+      try {
+        const result = await retryApiTranscode(cfg);
+        return res.json({
+          success: true,
+          message: result.message || 'Transcode retry request submitted',
+          started: Number(result.started || 0),
+          logPath: result.logPath || '',
+        });
+      } catch (error) {
+        return res.status(500).json({
+          error: error.message || 'Failed to request transcode retry',
+        });
+      }
+    });
+    console.log('[ARM Watch] Route /api/arm-watch/transcode/retry registered.');
 
     app.get('/apps/arm-watch/status', (req, res) => {
       res.json({ status: 'ok', message: 'Rip monitor is running' });

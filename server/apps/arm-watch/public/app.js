@@ -7,6 +7,7 @@ class ArmWatchApp {
       statusBar: document.getElementById('status-bar'),
       statusMessage: document.getElementById('status-message'),
       updateKeyBtn: document.getElementById('update-key-btn'),
+      retryTranscodeBtn: document.getElementById('retry-transcode-btn'),
       primaryCard: document.getElementById('primary-card'),
       posterBox: document.getElementById('poster-box'),
       posterImg: document.getElementById('poster-img'),
@@ -47,6 +48,7 @@ class ArmWatchApp {
     window.addEventListener('message', (event) => this.handleShellMessage(event));
     this.elements.refreshBtn.addEventListener('click', () => this.fetchAndRenderHealth(true));
     this.elements.updateKeyBtn.addEventListener('click', () => this.applyLatestKey());
+    this.elements.retryTranscodeBtn.addEventListener('click', () => this.retryTranscode());
     this.fetchAndRenderHealth();
     this.sendNavState(true);
   }
@@ -98,6 +100,7 @@ class ArmWatchApp {
 
   getFocusableElements() {
     const list = [];
+    if (this.elements.retryTranscodeBtn.classList.contains('visible')) list.push(this.elements.retryTranscodeBtn);
     if (this.elements.updateKeyBtn.classList.contains('visible')) list.push(this.elements.updateKeyBtn);
     list.push(this.elements.refreshBtn);
     return list;
@@ -111,10 +114,28 @@ class ArmWatchApp {
   }
 
   isActiveMode(data) {
+    const transcodeFailed = Boolean(data.transcode?.failed);
+    const noJobIssue = Array.isArray(data.issues) && data.issues.some((issue) =>
+      /no arm job\/progress logs found/i.test(String(issue || ''))
+    );
+    if (noJobIssue && !transcodeFailed) return false;
+    if (data.state === 'error' && !transcodeFailed) return false;
+    const ripHasSignal = Boolean(
+      (Number.isFinite(data.rip?.progressPct) && data.rip.progressPct > 0)
+      || (data.rip?.title && String(data.rip.title).trim())
+      || (data.rip?.discLabel && String(data.rip.discLabel).trim())
+    );
+    const transcodeHasSignal = Boolean(
+      (Number.isFinite(data.transcode?.progressPct) && data.transcode.progressPct > 0)
+      || Number.isFinite(data.transcode?.fps)
+      || (data.transcode?.codec && String(data.transcode.codec).trim())
+    );
+    const activeByFlags = (Boolean(data.rip?.active) && ripHasSignal)
+      || (Boolean(data.transcode?.active) && transcodeHasSignal);
     return data.state === 'ripping'
       || data.state === 'transcoding'
-      || Boolean(data.rip?.active)
-      || Boolean(data.transcode?.active);
+      || transcodeFailed
+      || activeByFlags;
   }
 
   setRowVisible(rowEl, visible) {
@@ -129,6 +150,15 @@ class ArmWatchApp {
     const h = Math.floor(sec / 3600);
     if (h > 0) return `${h}h ${m}m`;
     return `${m}m ${s}s`;
+  }
+
+  formatDateTime(ts) {
+    if (!Number.isFinite(ts) || ts <= 0) return '';
+    try {
+      return new Date(ts).toLocaleString();
+    } catch {
+      return '';
+    }
   }
 
   toneFromKeyStatus(keyStatus = {}) {
@@ -146,6 +176,22 @@ class ArmWatchApp {
   }
 
   renderStatusBar(data) {
+    const transcodeFailed = Boolean(data.transcode?.failed);
+    if (transcodeFailed) {
+      this.applyToneClass(this.elements.statusBar, 'status-bar', 'bad');
+      const detail = String(data.transcode?.error || '').trim();
+      this.elements.statusMessage.textContent = detail
+        ? `Transcode Failed: ${detail}`
+        : 'Transcode Failed';
+      this.elements.updateKeyBtn.classList.remove('visible');
+      this.elements.retryTranscodeBtn.classList.add('visible');
+      this.elements.updateKeyBtn.disabled = false;
+      this.elements.updateKeyBtn.textContent = 'Update Key';
+      this.elements.retryTranscodeBtn.disabled = false;
+      this.elements.retryTranscodeBtn.textContent = 'Retry Transcode';
+      return;
+    }
+
     const active = this.isActiveMode(data);
     if (active) {
       this.applyToneClass(this.elements.statusBar, 'status-bar', 'active');
@@ -153,8 +199,11 @@ class ArmWatchApp {
         ? 'Transcoding in Progress'
         : 'Ripping in Progress';
       this.elements.updateKeyBtn.classList.remove('visible');
+      this.elements.retryTranscodeBtn.classList.remove('visible');
       this.elements.updateKeyBtn.disabled = false;
       this.elements.updateKeyBtn.textContent = 'Update Key';
+      this.elements.retryTranscodeBtn.disabled = false;
+      this.elements.retryTranscodeBtn.textContent = 'Retry Transcode';
       return;
     }
 
@@ -164,13 +213,25 @@ class ArmWatchApp {
 
     const shouldShowUpdate = tone === 'warn';
     this.elements.updateKeyBtn.classList.toggle('visible', shouldShowUpdate);
+    this.elements.retryTranscodeBtn.classList.remove('visible');
     this.elements.updateKeyBtn.disabled = false;
     this.elements.updateKeyBtn.textContent = 'Update Key';
+    this.elements.retryTranscodeBtn.disabled = false;
+    this.elements.retryTranscodeBtn.textContent = 'Retry Transcode';
   }
 
   renderPosterState(data) {
-    const activeRip = data.state === 'ripping' || Boolean(data.rip?.active);
-    const activeTranscode = data.state === 'transcoding' || Boolean(data.transcode?.active);
+    const activeRip = data.state === 'ripping' || (data.state !== 'error' && Boolean(data.rip?.active));
+    const activeTranscode = data.state === 'transcoding' || (data.state !== 'error' && Boolean(data.transcode?.active));
+    const failedTranscode = Boolean(data.transcode?.failed);
+
+    if (failedTranscode) {
+      this.applyToneClass(this.elements.posterBox, 'poster', 'status-bad');
+      this.applyToneClass(this.elements.posterStatus, 'poster-status', 'bad');
+      this.elements.posterStatus.textContent = '!';
+      this.elements.posterStatus.title = 'Transcode failed';
+      return;
+    }
 
     if (activeRip) {
       this.applyToneClass(this.elements.posterBox, 'poster', 'status-active');
@@ -216,12 +277,16 @@ class ArmWatchApp {
     const title = data.media?.title || data.rip?.title || data.rip?.discLabel || 'Current Rip';
     this.elements.movieTitle.textContent = title;
 
-    if (data.state === 'ripping') {
+    if (data.transcode?.failed) {
+      this.elements.movieSubline.textContent = 'Transcode failed';
+    } else if (data.state === 'error') {
+      this.elements.movieSubline.textContent = 'No active media';
+    } else if (data.state === 'ripping') {
       this.elements.movieSubline.textContent = `Ripping from ${data.rip?.discLabel || 'disc source'}`;
     } else if (data.state === 'transcoding') {
       this.elements.movieSubline.textContent = 'Transcoding in progress';
     } else {
-      this.elements.movieSubline.textContent = 'Active job detected';
+      this.elements.movieSubline.textContent = 'No active media';
     }
 
     const progressPct = Number.isFinite(data.rip?.progressPct)
@@ -305,7 +370,17 @@ class ArmWatchApp {
 
     const status = document.createElement('div');
     status.className = 'secondary-status';
-    status.textContent = 'Completed';
+    const ripAt = this.formatDateTime(Number(item.ripCompletedAt || item.completedAt || 0));
+    const transcodeAt = this.formatDateTime(Number(item.transcodeCompletedAt || 0));
+    if (ripAt && transcodeAt) {
+      status.textContent = `Rip: ${ripAt} | Transcode: ${transcodeAt}`;
+    } else if (ripAt) {
+      status.textContent = `Rip: ${ripAt}`;
+    } else if (transcodeAt) {
+      status.textContent = `Transcode: ${transcodeAt}`;
+    } else {
+      status.textContent = 'Completed';
+    }
 
     meta.appendChild(title);
     meta.appendChild(status);
@@ -364,7 +439,10 @@ class ArmWatchApp {
     this.pollAbort = controller;
 
     try {
-      const response = await fetch('/api/arm-watch/health', { signal: controller.signal });
+      const url = manual
+        ? '/api/arm-watch/health?syncDb=1&forceKeyRefresh=1'
+        : '/api/arm-watch/health';
+      const response = await fetch(url, { signal: controller.signal });
       const data = await response.json();
       if (!response.ok) {
         throw new Error(data.error || data.message || `HTTP ${response.status}`);
@@ -445,12 +523,13 @@ class ArmWatchApp {
     try {
       const keyStatus = await this.fetchJson('/api/arm-watch/key-status');
       const internetKey = keyStatus.internetKey;
+      const internetExpiry = keyStatus.expiresOn;
       if (!internetKey) throw new Error('No internet key configured on server');
 
       await this.fetchJson('/api/arm-watch/update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ newKey: internetKey }),
+        body: JSON.stringify({ newKey: internetKey, newExpiry: internetExpiry }),
       });
 
       this.elements.updateKeyBtn.textContent = 'Updated';
@@ -465,6 +544,33 @@ class ArmWatchApp {
         this.elements.updateKeyBtn.textContent = oldText;
         this.elements.updateKeyBtn.disabled = false;
       }, 1500);
+    }
+  }
+
+  async retryTranscode() {
+    this.elements.retryTranscodeBtn.disabled = true;
+    const oldText = this.elements.retryTranscodeBtn.textContent;
+    this.elements.retryTranscodeBtn.textContent = 'Retrying...';
+
+    try {
+      await this.fetchJson('/api/arm-watch/transcode/retry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+
+      this.elements.retryTranscodeBtn.textContent = 'Started';
+      setTimeout(() => {
+        this.elements.retryTranscodeBtn.textContent = oldText;
+        this.elements.retryTranscodeBtn.disabled = false;
+      }, 1000);
+      this.fetchAndRenderHealth(true);
+    } catch (error) {
+      this.elements.retryTranscodeBtn.textContent = 'Failed';
+      setTimeout(() => {
+        this.elements.retryTranscodeBtn.textContent = oldText;
+        this.elements.retryTranscodeBtn.disabled = false;
+      }, 1800);
     }
   }
 }

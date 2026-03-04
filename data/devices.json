@@ -41,16 +41,108 @@
   {
     "id": "shell-mm5gpszj-weflfo",
     "connected": false,
-    "lastSeen": 1772511256376,
+    "lastSeen": 1772600933876,
     "inputs": [],
     "clientInfo": {
       "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.4 Safari/605.1.15",
       "browser": "Safari",
       "platform": "macOS",
       "deviceClass": "desktop",
-      "ip": "::ffff:192.168.65.1"
+      "ip": "::ffff:172.67.195.244"
+    },
+    "clientType": "simulator-shell",
+    "protocolVersion": 1,
+    "capabilities": {
+      "acceptsHardwareKeycodes": false,
+      "supportsSystemCommands": false,
+      "supportsTouch": true,
+      "supportsDialInput": true,
+      "supportsButtons": true
+    },
+    "shellVersion": "1.0.1-syncFix"
+  },
+  {
+    "id": "shell-mmbktwbp-l23wjp",
+    "connected": false,
+    "lastSeen": 1772600996699,
+    "inputs": [],
+    "clientInfo": {
+      "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 26_3_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/145.0.7632.108 Mobile/15E148 Safari/604.1",
+      "browser": "Chrome",
+      "platform": "iOS",
+      "deviceClass": "mobile",
+      "ip": "::ffff:172.67.195.244"
     },
     "clientType": "web-shell",
+    "protocolVersion": 1,
+    "capabilities": {
+      "acceptsHardwareKeycodes": false,
+      "supportsSystemCommands": false,
+      "supportsTouch": true,
+      "supportsDialInput": true,
+      "supportsButtons": true
+    },
+    "shellVersion": "1.0.1-syncFix"
+  },
+  {
+    "id": "shell-mmbkvp9t-l2ms1h",
+    "connected": false,
+    "lastSeen": 1772603157013,
+    "inputs": [],
+    "clientInfo": {
+      "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.3 Mobile/15E148 Safari/604.1",
+      "browser": "Safari",
+      "platform": "iOS",
+      "deviceClass": "mobile",
+      "ip": "::ffff:172.67.195.244"
+    },
+    "clientType": "simulator-shell",
+    "protocolVersion": 1,
+    "capabilities": {
+      "acceptsHardwareKeycodes": false,
+      "supportsSystemCommands": false,
+      "supportsTouch": true,
+      "supportsDialInput": true,
+      "supportsButtons": true
+    },
+    "shellVersion": "1.0.1-syncFix"
+  },
+  {
+    "id": "shell-mmbkwe8p-movr08",
+    "connected": false,
+    "lastSeen": 1772658717292,
+    "inputs": [],
+    "clientInfo": {
+      "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.3 Mobile/15E148 Safari/604.1",
+      "browser": "Safari",
+      "platform": "iOS",
+      "deviceClass": "mobile",
+      "ip": "::ffff:172.67.195.244"
+    },
+    "clientType": "web-shell",
+    "protocolVersion": 1,
+    "capabilities": {
+      "acceptsHardwareKeycodes": false,
+      "supportsSystemCommands": false,
+      "supportsTouch": true,
+      "supportsDialInput": true,
+      "supportsButtons": true
+    },
+    "shellVersion": "1.0.1-syncFix"
+  },
+  {
+    "id": "shell-mmbl2nry-468hzw",
+    "connected": false,
+    "lastSeen": 1772660743211,
+    "inputs": [],
+    "clientInfo": {
+      "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.3 Mobile/15E148 Safari/604.1",
+      "browser": "Safari",
+      "platform": "iOS",
+      "deviceClass": "mobile",
+      "ip": "::ffff:172.67.195.244"
+    },
+    "clientType": "simulator-shell",
     "protocolVersion": 1,
     "capabilities": {
       "acceptsHardwareKeycodes": false,

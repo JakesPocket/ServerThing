@@ -12,6 +12,7 @@ services:
       ARM_PROGRESS_LOGS_DIR: /arm/logs/progress
       ARM_ARM_LOG_PATH: /arm/logs/arm.log
       ARM_TRANSCODE_LOG_PATH: /arm/logs/transcode.log
+      ARM_DB_PATH: /arm/db/arm.db
     volumes:
       - arm_bridge_data:/app/data
       - ${ARM_HOST_SETTINGS_PATH}:/arm/settings/settings.conf:rw

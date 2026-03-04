@@ -1,5 +1,10 @@
 const fs = require('fs');
 const path = require('path');
+let ripEtaTwaState = {
+  jobKey: '',
+  startTimeMs: NaN,
+  lastProgressDecimal: NaN,
+};
 
 function parseLocalKey(settingsContent) {
   const quoted = String(settingsContent || '').match(/^\s*app_Key\s*=\s*"([^"]*)"/m);
@@ -7,6 +12,18 @@ function parseLocalKey(settingsContent) {
   const unquoted = String(settingsContent || '').match(/^\s*app_Key\s*=\s*([^\s#]+)\s*$/m);
   if (unquoted && unquoted[1]) return unquoted[1].trim();
   return '';
+}
+
+function parseLocalKeyExpiry(settingsContent) {
+  const quoted = String(settingsContent || '').match(/^\s*key_Expiry\s*=\s*"([^"]*)"/m);
+  if (quoted && quoted[1]) return quoted[1].trim();
+  const unquoted = String(settingsContent || '').match(/^\s*key_Expiry\s*=\s*([^\s#]+)\s*$/m);
+  if (unquoted && unquoted[1]) return unquoted[1].trim();
+  return '';
+}
+
+function isIsoDate(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || '').trim());
 }
 
 function updateSettingsKey(settingsContent, newKey) {
@@ -19,6 +36,33 @@ function updateSettingsKey(settingsContent, newKey) {
   }
   const suffix = content.endsWith('\n') || !content ? '' : '\n';
   return `${content}${suffix}${replacement}\n`;
+}
+
+function updateSettingsKeyExpiry(settingsContent, expiryDate) {
+  const content = String(settingsContent || '');
+  const normalizedDate = String(expiryDate || '').trim();
+  if (!isIsoDate(normalizedDate)) return content;
+
+  const expiryLine = `key_Expiry = "${normalizedDate}"`;
+  if (/^\s*key_Expiry\s*=.*$/m.test(content)) {
+    return content.replace(/^\s*key_Expiry\s*=.*$/m, expiryLine);
+  }
+
+  const keyLineMatch = content.match(/^\s*app_Key\s*=.*$/m);
+  if (keyLineMatch && typeof keyLineMatch.index === 'number') {
+    const lineStart = keyLineMatch.index;
+    const lineEnd = content.indexOf('\n', lineStart);
+    if (lineEnd === -1) return `${content}\n${expiryLine}\n`;
+    return `${content.slice(0, lineEnd + 1)}${expiryLine}\n${content.slice(lineEnd + 1)}`;
+  }
+
+  const suffix = content.endsWith('\n') || !content ? '' : '\n';
+  return `${content}${suffix}${expiryLine}\n`;
+}
+
+function updateSettingsKeyAndExpiry(settingsContent, newKey, expiryDate) {
+  const withKey = updateSettingsKey(settingsContent, newKey);
+  return updateSettingsKeyExpiry(withKey, expiryDate);
 }
 
 function parsePercent(text) {
@@ -142,13 +186,17 @@ function parseRipLog(text) {
 
   const prgvMatches = Array.from(String(text).matchAll(/PRGV:(\d+),(\d+),(\d+)/g));
   let prgvProgressPct = null;
+  let prgvProgressDecimal = NaN;
+  let prgvMax = NaN;
   let prgvActive = null;
   if (prgvMatches.length > 0) {
     const last = prgvMatches[prgvMatches.length - 1];
     const total = Number(last[2]);
     const max = Number(last[3]);
     if (Number.isFinite(total) && Number.isFinite(max) && max > 0) {
-      prgvProgressPct = Math.max(0, Math.min(100, (total / max) * 100));
+      prgvProgressDecimal = Math.max(0, Math.min(1, total / max));
+      prgvProgressPct = prgvProgressDecimal * 100;
+      prgvMax = max;
       prgvActive = total < max;
     }
   }
@@ -171,6 +219,7 @@ function parseRipLog(text) {
   const lines = String(text).split(/\r?\n/);
   let ripStartTs = NaN;
   let lastTs = NaN;
+  let firstPrgvTs = NaN;
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
     const lineTs = parseArmTimestampMs(line);
@@ -179,6 +228,10 @@ function parseRipLog(text) {
       if (/Ripping disc with MakeMKV|Starting MakeMKV rip|Starting Disc identification/i.test(line)) {
         ripStartTs = lineTs;
       }
+    }
+    if (!Number.isFinite(firstPrgvTs) && /PRGV:\d+,\d+,\d+/.test(line)) {
+      if (Number.isFinite(lineTs)) firstPrgvTs = lineTs;
+      else if (Number.isFinite(lastTs)) firstPrgvTs = lastTs;
     }
     const start = line.match(/\[ARM\]\s+Starting ARM for\s+(.+?)\s+on\s+(\S+)/i);
     if (start) armEvents.push({ kind: 'start', media: start[1].trim(), device: start[2].trim(), idx: i });
@@ -209,18 +262,39 @@ function parseRipLog(text) {
     }
   }
 
-  if (
-    etaSec === null &&
-    phase === 'ripping' &&
-    Number.isFinite(progressPct) &&
-    progressPct > 0 &&
-    progressPct < 100 &&
-    Number.isFinite(ripStartTs) &&
-    Number.isFinite(lastTs) &&
-    lastTs > ripStartTs
-  ) {
-    const elapsedSec = (lastTs - ripStartTs) / 1000;
-    etaSec = Math.round((elapsedSec * (100 - progressPct)) / progressPct);
+  if (phase === 'ripping' && Number.isFinite(prgvProgressDecimal) && prgvProgressDecimal > 0 && prgvProgressDecimal < 1) {
+    const currentTimeMs = Number.isFinite(lastTs) ? lastTs : Date.now();
+    const baseStartMs = Number.isFinite(firstPrgvTs)
+      ? firstPrgvTs
+      : (Number.isFinite(ripStartTs) ? ripStartTs : currentTimeMs);
+    const etaJobHint = `${(discLabelMatch && discLabelMatch[1]) ? discLabelMatch[1].trim() : ''}|${(titleMatch && titleMatch[1]) ? titleMatch[1].trim() : ''}`;
+    const jobKey = `${prgvMax}|${etaJobHint}`;
+    const resetByProgress = Number.isFinite(ripEtaTwaState.lastProgressDecimal) &&
+      (prgvProgressDecimal + 0.02 < ripEtaTwaState.lastProgressDecimal);
+    const resetByKey = ripEtaTwaState.jobKey !== jobKey;
+    if (resetByKey || resetByProgress || !Number.isFinite(ripEtaTwaState.startTimeMs)) {
+      ripEtaTwaState = {
+        jobKey,
+        startTimeMs: baseStartMs,
+        lastProgressDecimal: prgvProgressDecimal,
+      };
+    } else {
+      ripEtaTwaState.lastProgressDecimal = prgvProgressDecimal;
+    }
+
+    const elapsedSec = Math.max(0, (currentTimeMs - ripEtaTwaState.startTimeMs) / 1000);
+    if (elapsedSec > 0) {
+      const totalDurationSec = elapsedSec / prgvProgressDecimal;
+      let etaSecComputed = Math.max(0, totalDurationSec - elapsedSec);
+      if (prgvProgressDecimal > 0.99) etaSecComputed = Math.max(60, etaSecComputed);
+      etaSec = Math.round(etaSecComputed);
+    }
+  } else if (phase !== 'ripping') {
+    ripEtaTwaState = {
+      jobKey: '',
+      startTimeMs: NaN,
+      lastProgressDecimal: NaN,
+    };
   }
 
   const rawTitle = cleanVerboseArmLabel(titleMatch ? titleMatch[1].trim() : '');
@@ -243,37 +317,43 @@ function parseRipLog(text) {
 }
 
 function parseTranscodeLog(text) {
-  const lower = String(text || '').toLowerCase();
-  const hbProgress = parseHandBrakeProgress(text);
-  const fpsMatch = String(text || '').match(/\b(?:fps|frame(?:s)?\/s)\s*[:=]?\s*(\d+(?:\.\d+)?)/i);
-  const timeMatch = String(text || '').match(/\btime\s*=\s*\d{1,2}:\d{2}:\d{2}(?:\.\d+)?\b/i);
+  const body = String(text || '');
+  const lower = body.toLowerCase();
+  const hbProgress = parseHandBrakeProgress(body);
+  const fpsMatch = body.match(/\b(?:fps|frame(?:s)?\/s)\s*[:=]?\s*(\d+(?:\.\d+)?)/i);
+  const timeMatch = body.match(/\btime\s*=\s*\d{1,2}:\d{2}:\d{2}(?:\.\d+)?\b/i);
   const progressPct = (hbProgress && Number.isFinite(hbProgress.progressPct))
     ? hbProgress.progressPct
-    : parsePercent(text);
+    : parsePercent(body);
   const fps = (hbProgress && Number.isFinite(hbProgress.fps))
     ? hbProgress.fps
     : (fpsMatch ? Number(fpsMatch[1]) : null);
   const etaSec = (hbProgress && Number.isFinite(hbProgress.etaSec))
     ? hbProgress.etaSec
-    : parseEtaSec(text);
+    : parseEtaSec(body);
   const hasLiveTelemetry = Boolean(fpsMatch || timeMatch || Number.isFinite(progressPct));
-  const hasTranscodeContext = /(ffmpeg|handbrake|transcod|encoding|x26[45]|vaapi|nvenc|qsv)/i.test(text);
-  const completed = /(transcode complete|finished encoding|idle|all done|completed successfully|encode failed|fatal error)/i.test(text);
-  const active = hasTranscodeContext && hasLiveTelemetry && !completed;
+  const hasTranscodeContext = /(ffmpeg|handbrake|transcod|encoding|x26[45]|vaapi|nvenc|qsv)/i.test(body);
+  const completed = /(transcode complete|finished encoding|idle|all done|completed successfully|handbrake processing complete)/i.test(body);
+  const errorLine =
+    body.match(/unknown option\s*\((--[^)]+)\)/i) ||
+    body.match(/unrecognized option\s*['"]?(--\S+)/i) ||
+    body.match(/\b(?:encode failed|fatal error|handbrake\s+has\s+exited|error:\s*.+)\b/i);
+  const failed = Boolean(errorLine);
+  const active = hasTranscodeContext && hasLiveTelemetry && !completed && !failed;
 
   const codecMatch =
-    String(text || '').match(/(?:\+|\s)encoder:\s*(H\.?26[45]|HEVC|AV1)\b/i) ||
-    String(text || '').match(/encavcodecInit:\s*(H\.?26[45]|HEVC|AV1)/i) ||
-    String(text || '').match(/"Encoder"\s*:\s*"([^"]+)"/i) ||
-    String(text || '').match(/\b(libx264|libx265|h264|h265|hevc|av1)\b/i) ||
-    String(text || '').match(/\bVideo:\s*([a-zA-Z0-9_]+)/i);
+    body.match(/(?:\+|\s)encoder:\s*(H\.?26[45]|HEVC|AV1)\b/i) ||
+    body.match(/encavcodecInit:\s*(H\.?26[45]|HEVC|AV1)/i) ||
+    body.match(/"Encoder"\s*:\s*"([^"]+)"/i) ||
+    body.match(/\b(libx264|libx265|h264|h265|hevc|av1)\b/i) ||
+    body.match(/\bVideo:\s*([a-zA-Z0-9_]+)/i);
 
   let transcodeType = 'Unknown';
   let gpuMode = 'unknown';
   let gpuDetail = 'unknown';
 
-  const initHwMatch = String(text || '').match(/initialized encoder[\s\S]{0,240}?\b(nvenc|qsv|quicksync|vaapi|amf|vce)\b/i);
-  const initSwMatch = String(text || '').match(/initialized encoder[\s\S]{0,240}?\b(libx264|libx265|x264|x265)\b/i);
+  const initHwMatch = body.match(/initialized encoder[\s\S]{0,240}?\b(nvenc|qsv|quicksync|vaapi|amf|vce)\b/i);
+  const initSwMatch = body.match(/initialized encoder[\s\S]{0,240}?\b(libx264|libx265|x264|x265)\b/i);
 
   if (initHwMatch) {
     transcodeType = 'Hardware';
@@ -296,6 +376,8 @@ function parseTranscodeLog(text) {
 
   return {
     active,
+    failed,
+    error: failed ? String(errorLine[0] || '').trim() : '',
     progressPct,
     fps,
     codec: codecMatch ? codecMatch[1].toLowerCase() : '',
@@ -334,7 +416,11 @@ async function detectLatestFile(dirPath, filterFn = null) {
 
 module.exports = {
   parseLocalKey,
+  parseLocalKeyExpiry,
+  isIsoDate,
   updateSettingsKey,
+  updateSettingsKeyExpiry,
+  updateSettingsKeyAndExpiry,
   parseRipLog,
   parseTranscodeLog,
   readTextIfExists,
