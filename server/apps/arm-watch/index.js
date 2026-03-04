@@ -663,6 +663,9 @@ function parseTranscodeLog(text) {
   const hasTranscodeContext = /(ffmpeg|handbrake|transcod|encoding|x26[45]|vaapi|nvenc|qsv)/i.test(text);
   const completed = /(transcode complete|finished encoding|idle|all done|completed successfully|encode failed|fatal error)/i.test(text);
   const active = hasTranscodeContext && hasLiveTelemetry && !completed;
+  const failedLineMatch = (text || '').match(/[^\n]*(encode failed|fatal error)[^\n]*/i);
+  const failed = Boolean(failedLineMatch);
+  const errorMessage = failedLineMatch ? failedLineMatch[0].trim() : '';
 
   const codecMatch =
     text.match(/(?:\+|\s)encoder:\s*(H\.?26[45]|HEVC|AV1)\b/i) ||
@@ -701,6 +704,8 @@ function parseTranscodeLog(text) {
 
   return {
     active,
+    failed,
+    errorMessage,
     progressPct,
     fps,
     codec: codecMatch ? codecMatch[1].toLowerCase() : '',
@@ -849,6 +854,7 @@ function computeOverallState({ rip, transcode, keyStatus, issues }) {
   if (issues.length > 0) return 'error';
   if (rip.active) return 'ripping';
   if (transcode.active) return 'transcoding';
+  if (transcode.failed) return 'transcode_failed';
   if (keyStatus.state === 'error') return 'degraded';
   return 'idle';
 }

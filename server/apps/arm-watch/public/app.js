@@ -113,6 +113,7 @@ class ArmWatchApp {
   isActiveMode(data) {
     return data.state === 'ripping'
       || data.state === 'transcoding'
+      || data.state === 'transcode_failed'
       || Boolean(data.rip?.active)
       || Boolean(data.transcode?.active);
   }
@@ -148,6 +149,14 @@ class ArmWatchApp {
   renderStatusBar(data) {
     const active = this.isActiveMode(data);
     if (active) {
+      if (data.state === 'transcode_failed') {
+        this.applyToneClass(this.elements.statusBar, 'status-bar', 'bad');
+        this.elements.statusMessage.textContent = 'Transcode Failed';
+        this.elements.updateKeyBtn.classList.remove('visible');
+        this.elements.updateKeyBtn.disabled = false;
+        this.elements.updateKeyBtn.textContent = 'Update Key';
+        return;
+      }
       this.applyToneClass(this.elements.statusBar, 'status-bar', 'active');
       this.elements.statusMessage.textContent = data.state === 'transcoding'
         ? 'Transcoding in Progress'
@@ -220,6 +229,8 @@ class ArmWatchApp {
       this.elements.movieSubline.textContent = `Ripping from ${data.rip?.discLabel || 'disc source'}`;
     } else if (data.state === 'transcoding') {
       this.elements.movieSubline.textContent = 'Transcoding in progress';
+    } else if (data.state === 'transcode_failed') {
+      this.elements.movieSubline.textContent = 'Transcode Failed';
     } else {
       this.elements.movieSubline.textContent = 'Active job detected';
     }
@@ -261,7 +272,11 @@ class ArmWatchApp {
     this.renderPoster(data.media || {});
     this.renderPosterState(data);
 
-    const issues = Array.isArray(data.issues) ? data.issues : [];
+    const baseIssues = Array.isArray(data.issues) ? data.issues : [];
+    const transcodeErrors = (data.state === 'transcode_failed' && data.transcode?.errorMessage)
+      ? [data.transcode.errorMessage]
+      : [];
+    const issues = [...transcodeErrors, ...baseIssues];
     if (issues.length) {
       this.elements.issues.style.display = 'block';
       this.elements.issues.innerHTML = issues.map((issue) => `- ${issue}`).join('<br>');
