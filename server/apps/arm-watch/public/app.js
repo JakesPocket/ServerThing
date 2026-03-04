@@ -179,10 +179,7 @@ class ArmWatchApp {
     const transcodeFailed = Boolean(data.transcode?.failed);
     if (transcodeFailed) {
       this.applyToneClass(this.elements.statusBar, 'status-bar', 'bad');
-      const detail = String(data.transcode?.error || '').trim();
-      this.elements.statusMessage.textContent = detail
-        ? `Transcode Failed: ${detail}`
-        : 'Transcode Failed';
+      this.elements.statusMessage.textContent = 'Transcode Failed';
       this.elements.updateKeyBtn.classList.remove('visible');
       this.elements.retryTranscodeBtn.classList.add('visible');
       this.elements.updateKeyBtn.disabled = false;
