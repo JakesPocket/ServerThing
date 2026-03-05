@@ -1,0 +1,17 @@
+services:
+  # Branch-testing override.
+  # Use with:
+  # docker compose --project-name serverthing-branch --env-file .env.dev -f compose.dev.yaml -f compose.branch.yaml up -d --build
+  arm-bridge:
+    container_name: arm-bridge-branch
+    ports:
+      - "${ARM_BRIDGE_BRANCH_PORT:-8180}:8080"
+    volumes:
+      - ./data-branch:/app/data
+
+  serverthing:
+    container_name: serverthing-branch
+    ports:
+      - "${SERVERTHING_BRANCH_PORT:-3100}:3000"
+    volumes:
+      - ./data-branch:/app/data

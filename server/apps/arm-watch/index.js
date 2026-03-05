@@ -462,7 +462,10 @@ function getFastKeyReference(cfg, forceRefresh = false) {
 }
 
 function extractTitleMetadata(rawTitle) {
-  const raw = String(rawTitle || '');
+  const raw = String(rawTitle || '')
+    .replace(/:\s*<class\s+'str'>/ig, '')
+    .replace(/<class\s+'str'>/ig, '')
+    .trim();
   const yearMatch = raw.match(/\byear\s*:\s*(\d{4})\b/i);
   const videoTypeMatch = raw.match(/\bvideo_type\s*:\s*([^\s]+)/i);
   const discTypeMatch = raw.match(/\bdisctype\s*:\s*([^\s]+)/i);
@@ -507,7 +510,10 @@ function isUnknownLabel(value) {
 }
 
 function sanitizeMediaLabel(value) {
-  const v = String(value || '').trim();
+  const v = String(value || '')
+    .replace(/:\s*<class\s+'str'>/ig, '')
+    .replace(/<class\s+'str'>/ig, '')
+    .trim();
   return isUnknownLabel(v) ? '' : v;
 }
 
@@ -728,13 +734,14 @@ function parseTranscodeLog(text) {
     ? hbProgress.etaSec
     : parseEtaSec(body);
   const hasLiveTelemetry = Boolean(fpsMatch || timeMatch || Number.isFinite(progressPct));
-  const hasTranscodeContext = /(ffmpeg|handbrake|transcod|encoding|x26[45]|vaapi|nvenc|qsv)/i.test(body);
+  const hasTranscodeContext = /(ffmpeg|handbrake|encoding|x26[45]|vaapi|nvenc|qsv|hb_init)/i.test(body);
   const completed = /(transcode complete|finished encoding|idle|all done|completed successfully|handbrake processing complete)/i.test(body);
   const errorLine =
     body.match(/unknown option\s*\((--[^)]+)\)/i) ||
     body.match(/unrecognized option\s*['"]?(--\S+)/i) ||
-    body.match(/\b(?:encode failed|fatal error|handbrake\s+has\s+exited|error:\s*.+)\b/i);
-  const failed = Boolean(errorLine);
+    body.match(/\b(?:encode failed|fatal error|handbrake\s+has\s+exited)\b/i) ||
+    body.match(/\bhandbrake\b[\s\S]{0,80}\bexit code\b[\s:=]+[1-9]\d*\b/i);
+  const failed = hasTranscodeContext && Boolean(errorLine);
   const active = hasTranscodeContext && hasLiveTelemetry && !completed && !failed;
 
   const codecMatch =

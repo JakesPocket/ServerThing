@@ -1,0 +1,25 @@
+[
+  {
+    "id": "shell-mm5gpszj-weflfo",
+    "connected": false,
+    "lastSeen": 1772680889653,
+    "inputs": [],
+    "clientInfo": {
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.4 Safari/605.1.15",
+      "browser": "Safari",
+      "platform": "macOS",
+      "deviceClass": "desktop",
+      "ip": "::ffff:172.67.195.244"
+    },
+    "clientType": "simulator-shell",
+    "protocolVersion": 1,
+    "capabilities": {
+      "acceptsHardwareKeycodes": false,
+      "supportsSystemCommands": false,
+      "supportsTouch": true,
+      "supportsDialInput": true,
+      "supportsButtons": true
+    },
+    "shellVersion": "1.0.1-syncFix"
+  }
+]
