@@ -206,21 +206,15 @@ function ensureHistoryLoaded() {
     const text = fs.readFileSync(HISTORY_FILE_PATH, 'utf8');
     const parsed = JSON.parse(text);
     if (Array.isArray(parsed?.items)) {
-      items = parsed.items
-        .filter((v) => v && typeof v === 'object')
-        .map((v) => ({
-          id: String(v.id || ''),
-          title: String(v.title || '').trim(),
-          posterUrl: String(v.posterUrl || '').trim(),
-          completedAt: Number(v.completedAt || 0),
-          status: 'completed',
-        }))
-        .filter((v) => v.title && Number.isFinite(v.completedAt) && v.completedAt > 0);
+      items = parsed.items;
     }
   } catch {
     items = [];
   }
-  ripHistoryCache = items.slice(0, MAX_HISTORY_ITEMS);
+  const normalized = normalizeHistoryItems(items);
+  ripHistoryCache = normalized;
+  // Keep on-disk cache consistent with normalized UI output.
+  persistHistory(normalized);
   return ripHistoryCache;
 }
 
@@ -278,6 +272,49 @@ function updateRipHistoryFromTelemetry({ rip, transcode, media }) {
 
 function getRipHistory() {
   return ensureHistoryLoaded();
+}
+
+function normalizeHistoryItems(items = []) {
+  const normalized = (Array.isArray(items) ? items : [])
+    .filter((v) => v && typeof v === 'object')
+    .map((v) => {
+      const rawTitle = String(v.title || '').trim();
+      const cleanTitle = titleForHistory(rawTitle) || sanitizeMediaLabel(extractTitleMetadata(rawTitle).title || '');
+      return {
+      id: String(v.id || ''),
+      title: cleanTitle,
+      posterUrl: String(v.posterUrl || '').trim(),
+      completedAt: Number(v.completedAt || v.transcodeCompletedAt || v.ripCompletedAt || 0),
+      ripCompletedAt: Number(v.ripCompletedAt || 0),
+      transcodeCompletedAt: Number(v.transcodeCompletedAt || 0),
+      status: String(v.status || 'completed').trim() || 'completed',
+      source: String(v.source || '').trim(),
+      jobId: Number(v.jobId || 0) || undefined,
+      };
+    })
+    .filter((v) => v.title && Number.isFinite(v.completedAt) && v.completedAt > 0)
+    .sort((a, b) => b.completedAt - a.completedAt)
+    .slice(0, MAX_HISTORY_ITEMS * 2);
+
+  // Collapse malformed variants into one canonical title entry.
+  const seenTitles = new Set();
+  const deduped = [];
+  for (const item of normalized) {
+    const key = item.title.toLowerCase();
+    if (seenTitles.has(key)) continue;
+    seenTitles.add(key);
+    deduped.push(item);
+    if (deduped.length >= MAX_HISTORY_ITEMS) break;
+  }
+
+  return deduped;
+}
+
+function setRipHistory(items) {
+  const normalized = normalizeHistoryItems(items);
+  ripHistoryCache = normalized;
+  persistHistory(normalized);
+  return normalized;
 }
 
 function collectKeyRecords(value, out = []) {
@@ -462,7 +499,10 @@ function getFastKeyReference(cfg, forceRefresh = false) {
 }
 
 function extractTitleMetadata(rawTitle) {
-  const raw = String(rawTitle || '');
+  const raw = String(rawTitle || '')
+    .replace(/:\s*<class\s+'str'>/ig, '')
+    .replace(/<class\s+'str'>/ig, '')
+    .trim();
   const yearMatch = raw.match(/\byear\s*:\s*(\d{4})\b/i);
   const videoTypeMatch = raw.match(/\bvideo_type\s*:\s*([^\s]+)/i);
   const discTypeMatch = raw.match(/\bdisctype\s*:\s*([^\s]+)/i);
@@ -507,7 +547,10 @@ function isUnknownLabel(value) {
 }
 
 function sanitizeMediaLabel(value) {
-  const v = String(value || '').trim();
+  const v = String(value || '')
+    .replace(/:\s*<class\s+'str'>/ig, '')
+    .replace(/<class\s+'str'>/ig, '')
+    .trim();
   return isUnknownLabel(v) ? '' : v;
 }
 
@@ -569,6 +612,7 @@ function parseHandBrakeProgress(text) {
 
 function parseRipLog(text) {
   const lower = text.toLowerCase();
+  const armProcessingComplete = /arm processing complete/i.test(text);
   const active = /(makemkvcon|ripping|saving title|copy complete|title #\d+)/i.test(text) &&
     !/(idle|waiting for disc|no disc)/i.test(text);
 
@@ -700,6 +744,19 @@ function parseRipLog(text) {
   const cleanTitle = sanitizeMediaLabel(parsedTitle.title || rawTitle);
   const cleanDiscLabel = sanitizeMediaLabel(parsedDisc.title || rawDiscLabel);
 
+  if (armProcessingComplete) {
+    return {
+      active: false,
+      title: '',
+      discLabel: '',
+      titleYear: '',
+      progressPct: null,
+      phase: 'idle',
+      etaSec: null,
+      arm,
+    };
+  }
+
   return {
     active: prgvProgressPct !== null ? effectiveActive : phase === 'ripping',
     title: cleanTitle,
@@ -728,13 +785,15 @@ function parseTranscodeLog(text) {
     ? hbProgress.etaSec
     : parseEtaSec(body);
   const hasLiveTelemetry = Boolean(fpsMatch || timeMatch || Number.isFinite(progressPct));
-  const hasTranscodeContext = /(ffmpeg|handbrake|transcod|encoding|x26[45]|vaapi|nvenc|qsv)/i.test(body);
-  const completed = /(transcode complete|finished encoding|idle|all done|completed successfully|handbrake processing complete)/i.test(body);
-  const errorLine =
+  const hasTranscodeContext = /(ffmpeg|handbrake|encoding|x26[45]|vaapi|nvenc|qsv|hb_init)/i.test(body);
+  const completed = /(transcode complete|finished encoding|idle|all done|completed successfully|handbrake processing complete|encode done!\s*$|libhb:\s*work result\s*=\s*0)/im.test(body);
+  const explicitFailure =
     body.match(/unknown option\s*\((--[^)]+)\)/i) ||
     body.match(/unrecognized option\s*['"]?(--\S+)/i) ||
-    body.match(/\b(?:encode failed|fatal error|handbrake\s+has\s+exited|error:\s*.+)\b/i);
-  const failed = Boolean(errorLine);
+    body.match(/\b(?:encode failed|fatal error)\b/i) ||
+    body.match(/libhb:\s*work result\s*=\s*([1-9]\d*)/i) ||
+    body.match(/\bhandbrake\b[\s\S]{0,80}\bexit code\b[\s:=]+[1-9]\d*\b/i);
+  const failed = hasTranscodeContext && Boolean(explicitFailure) && !completed;
   const active = hasTranscodeContext && hasLiveTelemetry && !completed && !failed;
 
   const codecMatch =
@@ -775,7 +834,7 @@ function parseTranscodeLog(text) {
   return {
     active,
     failed,
-    error: failed ? String(errorLine[0] || '').trim() : '',
+    error: failed ? String(explicitFailure[0] || '').trim() : '',
     progressPct,
     fps,
     codec: codecMatch ? codecMatch[1].toLowerCase() : '',
@@ -784,6 +843,26 @@ function parseTranscodeLog(text) {
     gpuDetail,
     etaSec,
   };
+}
+
+function hasSuccessfulTranscodeMarkers(text) {
+  const body = String(text || '');
+  return /(encode done!\s*$|libhb:\s*work result\s*=\s*0|handbrake processing complete|arm processing complete)/im.test(body);
+}
+
+function normalizeTranscodeFailure(transcode, evidenceText = '') {
+  const t = (transcode && typeof transcode === 'object') ? { ...transcode } : {};
+  const errorText = String(t.error || '').trim();
+  if (!t.failed) return t;
+
+  const benignExit = /handbrake has exited/i.test(errorText);
+  if (benignExit && hasSuccessfulTranscodeMarkers(evidenceText)) {
+    t.failed = false;
+    t.error = '';
+    if (!Number.isFinite(t.progressPct)) t.progressPct = 100;
+    t.active = false;
+  }
+  return t;
 }
 
 function applyTranscodeDetectionLine(state, line) {
@@ -1114,7 +1193,7 @@ async function getArmJsonTelemetry(cfg) {
     const s = `${j?.status || ''} ${j?.stage || ''} ${j?.state || ''}`.toLowerCase();
     if (!s) return true;
     return !/(success|failed|done|complete|abandon|deleted|idle)/i.test(s);
-  }) || jobs[0] || null;
+  }) || null;
 
   if (!activeJob) {
     return {
@@ -1174,6 +1253,12 @@ async function retryApiTranscode(cfg) {
     throw new Error(payload.error || payload.message || 'ARM API rejected transcode retry');
   }
   return payload;
+}
+
+async function fetchApiHistory(cfg, limit = MAX_HISTORY_ITEMS) {
+  const payload = await apiFetchJson(cfg, `/api/serverthing/history?limit=${Math.max(1, Math.min(500, Math.floor(limit)))}`);
+  const raw = Array.isArray(payload?.items) ? payload.items : [];
+  return normalizeHistoryItems(raw);
 }
 
 async function fetchPoster(title, omdbKey, year = '') {
@@ -1276,7 +1361,7 @@ async function getTelemetry(cfg, keyRef) {
   if (useArmJsonApi(cfg)) {
     const telemetry = await getArmJsonTelemetry(cfg);
     let rip = telemetry.rip;
-    let transcode = telemetry.transcode;
+    let transcode = normalizeTranscodeFailure(telemetry.transcode, '');
     const issues = Array.isArray(telemetry.issues) ? telemetry.issues : [];
 
     if (!telemetry.latestJobLogPath && !telemetry.latestProgressLogPath) {
@@ -1332,6 +1417,10 @@ async function getTelemetry(cfg, keyRef) {
     let transcode = (telemetry.transcode && typeof telemetry.transcode === 'object')
       ? telemetry.transcode
       : parseTranscodeLog(latestJobLogText || '');
+    transcode = normalizeTranscodeFailure(
+      transcode,
+      [latestJobLogText, progressLogText, armLogText].filter(Boolean).join('\n')
+    );
 
     // Avoid stale "active" UI when ARM API has no current job/progress logs.
     if (!latestJobLogPath && !latestProgressLogPath) {
@@ -1388,8 +1477,12 @@ async function getTelemetry(cfg, keyRef) {
   const keyStatus = computeKeyStatus(localKey, keyRef.internetKey, keyRef.internetExpiry, keyErrors);
   const rip = parseRipLog([latestJobLogText, progressLogText, armLogText].filter(Boolean).join('\n'));
   const transcode = parseTranscodeLog(latestJobLogText || '');
+  const normalizedTranscode = normalizeTranscodeFailure(
+    transcode,
+    [latestJobLogText, progressLogText, armLogText].filter(Boolean).join('\n')
+  );
 
-  return { issues, rip, transcode, keyStatus, drives, latestJobLogPath, latestProgressLogPath };
+  return { issues, rip, transcode: normalizedTranscode, keyStatus, drives, latestJobLogPath, latestProgressLogPath };
 }
 
 async function buildHealth(cfg, options = {}) {
@@ -1418,6 +1511,15 @@ async function buildHealth(cfg, options = {}) {
   }
 
   try {
+    if (options.syncDb && hasApiMode(cfg)) {
+      try {
+        const dbItems = await fetchApiHistory(cfg, MAX_HISTORY_ITEMS);
+        setRipHistory(dbItems);
+      } catch {
+        // Keep existing cached history when DB sync is unavailable.
+      }
+    }
+
     // Never block health on internet key refresh; return quickly with cached key data.
     const keyRef = getFastKeyReference(cfg, Boolean(options.forceKeyRefresh));
     const { issues, rip, transcode, keyStatus, drives, latestJobLogPath, latestProgressLogPath } = await getTelemetry(cfg, keyRef);
@@ -1503,6 +1605,7 @@ module.exports = {
     app.get('/api/arm-watch/health', async (req, res) => {
       const cfg = getConfig();
       const health = await buildHealth(cfg, {
+        syncDb: String(req.query.syncDb || '') === '1',
         forceKeyRefresh: String(req.query.forceKeyRefresh || '') === '1',
       });
       res.json(health);
